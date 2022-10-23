@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -26,20 +27,23 @@ namespace FileSystemSearch
 
     public class DataItem
     {
-        int Id { get; set; }
-        string CaseInsensitiveFilename { get; set; }
-        string FullPath { get; set; }
+        [Key]
+        public long Id { get; set; }
+
+        public string CaseInsensitiveFilename { get; set; }
+        public string FullPath { get; set; }
         //Dictionary<int, int> PositionInPatternList = new Dictionary<int, int>();
         //dictionary pattern is: PatternListID:PrimaryKey of this item in that list
 
-        List<int> PatternListsContainingThis = new List<int>();
+        public List<int> PatternListsContainingThis = new List<int>();
     }
 
     public class PatternList
     {
-        int Id { get; set; }
-        int Size { get; set; }
-        string pattern { get; set; }
-        List<int> ForeignKeyInMainList = new List<int>();
+        public long Id { get; set; }
+
+        public int Size { get; set; }
+        public string pattern { get; set; }
+        public List<int> ForeignKeyInMainList = new List<int>();
     }
 }
