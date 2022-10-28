@@ -34,33 +34,86 @@ void doStuff()
     {
         //DBHandler.AddFolder(db, new DirectoryInfo(localDirs), true);
 
-        //DBHandler.GeneratePatterns(db);
-
-        IQueryable patternoutcome = from PatternList in db.PatternLists
-                                    select PatternList;
-
-        Console.WriteLine("Patterns: ");
-
-        foreach (PatternList list in patternoutcome)
+        if (false) //View DB
         {
-            Console.Write("[" + list.pattern + "] ");
-        }
-        Console.WriteLine();
+            IQueryable viewFiles = from DataItem in db.DataItems
+                                   select DataItem;
 
-        DBHandler.PopulatePatternLists(db);
-
-        IQueryable testlist = from PatternList in db.PatternLists
-                              where PatternList.pattern == "a"
-                              select PatternList;
-
-        foreach (PatternList pattern in testlist)
-        {
-            Console.WriteLine("Pattern info: " + pattern.pattern + " Count: " + pattern.DataItems.Count);
-            Console.WriteLine("Pattern results: ");
-
-            foreach (DataItem item in pattern.DataItems)
+            foreach (DataItem file in viewFiles)
             {
-                Console.WriteLine(item.CaseInsensitiveFilename);
+                Console.WriteLine("File: " + file.CaseInsensitiveFilename);
+            }
+        }
+
+        if (false) //Generate patterns
+        {
+            if (false) //Delete existing patterns first
+            {
+                IQueryable deleteThese = from PatternList in db.PatternLists
+                                         select PatternList;
+
+                foreach (PatternList list in deleteThese)
+                {
+                    DBHandler.RemoveItem(db, list);
+                }
+            }
+
+            Console.WriteLine("Generating patterns");
+            DBHandler.GeneratePatterns(db);
+            Console.WriteLine("Patterns generated");
+        }
+
+        if (true) //Show patterns
+        {
+            IQueryable patternoutcome = from PatternList in db.PatternLists
+                                        select PatternList;
+
+            Console.WriteLine("Patterns: ");
+
+            foreach (PatternList list in patternoutcome)
+            {
+                Console.Write("[" + list.pattern + "] ");
+            }
+            Console.WriteLine();
+        }
+
+        if (false) //Populate patterns
+        {
+            Console.WriteLine("Populating patterns");
+            DBHandler.PopulatePatternLists(db);
+            Console.WriteLine("Done populating patterns");
+
+        }
+
+        if (true) //Print contents of a pattern list
+        {
+            //Get the ID for the list corresponding to "a"
+            IQueryable testlist = from PatternList in db.PatternLists
+                                  where PatternList.pattern == "a"
+                                  select PatternList;
+
+            long id = 0;
+            foreach (PatternList list in testlist)
+            {
+                id = list.Id;
+                break;
+            }
+
+            IQueryable resolvelist = from DataItemPatternList in db.DataItemPatternLists
+                                      where DataItemPatternList.PatternListId == id
+                                      select DataItemPatternList;
+
+            foreach (DataItemPatternList list in resolvelist)
+            {
+                IQueryable getData = from DataItem in db.DataItems
+                                     where DataItem.Id == list.DataItemId
+                                     select DataItem;
+
+                foreach (DataItem atLast in getData)
+                {
+                    Console.WriteLine(atLast.CaseInsensitiveFilename);
+                }
+
             }
         }
     }

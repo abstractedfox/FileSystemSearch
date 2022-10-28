@@ -13,6 +13,8 @@ namespace FileSystemSearch
     {
         public DbSet<DataItem> DataItems { get; set; }
         public DbSet<PatternList> PatternLists { get; set; }
+        public DbSet<DataItemPatternList> DataItemPatternLists { get; set; }
+
         public string DbPath { get; } //local path to the database
 
         public DBClass()
@@ -34,6 +36,13 @@ namespace FileSystemSearch
         public string CaseInsensitiveFilename { get; set; }
         public string FullPath { get; set; }
 
+        public ICollection<PatternList> PatternLists { get; set; }
+
+        public DataItem()
+        {
+            PatternLists = new List<PatternList>();
+        }
+
     }
 
     public class PatternList
@@ -50,5 +59,17 @@ namespace FileSystemSearch
         {
             this.DataItems = new List<DataItem>();
         }
+    }
+
+    //association table
+    public class DataItemPatternList
+    {
+        public long DataItemId { get; set; }
+        public long PatternListId { get; set; }
+
+        public virtual DataItem DataItem { get; set; }
+        public virtual PatternList PatternList { get; set; }
+
+
     }
 }

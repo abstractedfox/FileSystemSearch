@@ -48,8 +48,7 @@ namespace FileSystemSearch
                 }
                 else return ResultCode.FAIL;
             }
-
-            //using (db)
+                        //using (db)
             {
                 try
                 {
@@ -58,7 +57,7 @@ namespace FileSystemSearch
                 }
                 catch (UnauthorizedAccessException e)
                 {
-                    _UnauthorizedFileHandler(files.Last<FileInfo>(), e);
+                    _UnauthorizedFileHandler(e);
                 }
                 catch (Exception e)
                 {
@@ -110,23 +109,29 @@ namespace FileSystemSearch
         }
 
         
-        //Remove an item by its private key
-        public static ResultCode RemoveItem(DBClass db, long pKey)
+        //Remove a list
+        public static ResultCode RemoveItem(DBClass db, PatternList list)
         {
-            IQueryable item = from DataItem in db.DataItems
-                              where DataItem.Id == pKey
-                              select DataItem;
+            IQueryable items = from PatternList in db.PatternLists
+                              where PatternList == list
+                              select PatternList;
 
-            int foundItems = 0;
 
-            foreach (DataItem test in item)
+            foreach (PatternList listToDelete in items)
             {
-                foundItems++;
+                try
+                {
+                    listToDelete.DataItems.Clear();
+                    Console.WriteLine("jawns: " + listToDelete.DataItems.Count());
+                    
+                    db.Remove(listToDelete);
+                }
+                catch (Exception e)
+                {
+                    _DebugOut("Exception thrown when attempting to delete a list: " + e);
+                }
             }
 
-            if (foundItems == 0) return ResultCode.ITEM_NOT_FOUND;
-
-            db.Remove(item);
 
             db.SaveChanges();
 
@@ -293,7 +298,7 @@ namespace FileSystemSearch
                 }
                 catch (UnauthorizedAccessException e)
                 {
-                    _UnauthorizedFileHandler(files.Last<FileInfo>(), e);
+                    _UnauthorizedFileHandler(e);
                 }
                 catch (Exception e)
                 {
@@ -306,7 +311,7 @@ namespace FileSystemSearch
                 }
                 catch (UnauthorizedAccessException e)
                 {
-                    _UnauthorizedFileHandler(folders.Last<DirectoryInfo>(), e);
+                    _UnauthorizedFileHandler(e);
                 }
                 catch (Exception e)
                 {
@@ -357,12 +362,17 @@ namespace FileSystemSearch
         //Create a new pattern list. Performs duplicate check.
         private static ResultCode _CreatePatternList(DBClass db, string newPattern)
         {
+            const bool debug = true;
+            const string debugName = "_CreatePatternList:";
+
             if (_IsDuplicate(db, newPattern))
             {
                 return ResultCode.DUPLICATE_FOUND;
             }
 
             PatternList newList = new PatternList { pattern = newPattern, Size = 0 };
+
+            if (debug) _DebugOut(debugName + "New pattern list added: " + newList.pattern);
 
             db.Add(newList);
 
@@ -391,6 +401,7 @@ namespace FileSystemSearch
             {
                 int keysFound = 0;
 
+                
                 IQueryable findDupe = from DataItem in db.DataItems
                                       where DataItem.FullPath == itemToCheck.FullPath
                                       select DataItem;
@@ -441,9 +452,9 @@ namespace FileSystemSearch
 
 
         //Call when handling an unauthorized access exception from the file system
-        private static void _UnauthorizedFileHandler(object file, Exception e)
+        private static void _UnauthorizedFileHandler(Exception e)
         {
-            Console.WriteLine("Exceptioun!!!!!" + e);
+            Console.WriteLine("Exceptioun!!!!! Unauthorized File ignored");
         }
 
 
