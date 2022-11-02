@@ -16,21 +16,6 @@ namespace FileSystemSearch.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "6.0.10");
 
-            modelBuilder.Entity("DataItemPatternList", b =>
-                {
-                    b.Property<long>("DataItemsId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<long>("PatternListsId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("DataItemsId", "PatternListsId");
-
-                    b.HasIndex("PatternListsId");
-
-                    b.ToTable("DataItemPatternList");
-                });
-
             modelBuilder.Entity("FileSystemSearch.DataItem", b =>
                 {
                     b.Property<long>("Id")
@@ -38,16 +23,35 @@ namespace FileSystemSearch.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("CaseInsensitiveFilename")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FullPath")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
                     b.ToTable("DataItems");
+                });
+
+            modelBuilder.Entity("FileSystemSearch.DataItemPatternList", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("DataItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PatternListId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DataItemId");
+
+                    b.HasIndex("PatternListId");
+
+                    b.ToTable("DataItemPatternLists");
                 });
 
             modelBuilder.Entity("FileSystemSearch.PatternList", b =>
@@ -56,11 +60,7 @@ namespace FileSystemSearch.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("Size")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("pattern")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -68,19 +68,23 @@ namespace FileSystemSearch.Migrations
                     b.ToTable("PatternLists");
                 });
 
-            modelBuilder.Entity("DataItemPatternList", b =>
+            modelBuilder.Entity("FileSystemSearch.DataItemPatternList", b =>
                 {
-                    b.HasOne("FileSystemSearch.DataItem", null)
+                    b.HasOne("FileSystemSearch.DataItem", "DataItem")
                         .WithMany()
-                        .HasForeignKey("DataItemsId")
+                        .HasForeignKey("DataItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("FileSystemSearch.PatternList", null)
+                    b.HasOne("FileSystemSearch.PatternList", "PatternList")
                         .WithMany()
-                        .HasForeignKey("PatternListsId")
+                        .HasForeignKey("PatternListId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("DataItem");
+
+                    b.Navigation("PatternList");
                 });
 #pragma warning restore 612, 618
         }

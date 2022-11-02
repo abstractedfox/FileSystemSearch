@@ -33,14 +33,14 @@ namespace FileSystemSearch
         [Key]
         public long Id { get; set; }
 
-        public string CaseInsensitiveFilename { get; set; }
-        public string FullPath { get; set; }
+        public string? CaseInsensitiveFilename { get; set; }
+        public string? FullPath { get; set; }
 
-        public ICollection<PatternList> PatternLists { get; set; }
+        //public ICollection<PatternList> PatternLists { get; set; }
 
         public DataItem()
         {
-            PatternLists = new List<PatternList>();
+            //PatternLists = new List<PatternList>();
         }
 
     }
@@ -50,20 +50,22 @@ namespace FileSystemSearch
         [Key]
         public long Id { get; set; }
 
-        public int Size { get; set; }
-        public string pattern { get; set; }
+        public string? pattern { get; set; }
 
-        public ICollection<DataItem> DataItems { get; set; }
+        //public ICollection<DataItem> DataItems { get; set; }
 
         public PatternList()
         {
-            this.DataItems = new List<DataItem>();
+            //this.DataItems = new List<DataItem>();
         }
     }
 
     //association table
     public class DataItemPatternList
     {
+        [Key]
+        public long Id { get; set; }
+
         public long DataItemId { get; set; }
         public long PatternListId { get; set; }
 

@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 
 
-//This file isn't temporary and will probably be super boilerplatey
+//This file is temporary and will probably be super boilerplatey
 
 Console.WriteLine("Hello, World!");
 
@@ -22,9 +22,46 @@ var folder = Environment.SpecialFolder.LocalApplicationData;
 var path = Environment.GetFolderPath(folder);
 string DbPath = System.IO.Path.Join(path, "database.db");
 
+List<DataItem> results = new List<DataItem>();
+
+//testSearch();
+
 doStuff();
 
-void doStuff()
+
+
+while (true)
+{
+    await Task.Delay(20000);
+}
+
+async void testSearch()
+{
+
+    using (DBClass db = new DBClass())
+    {
+
+        //await DataSearch.QuerySearch(db, "adobe", ReceiveData);
+        await DataSearch.SmartSearch(db, "adobe", ReceiveData, 8);
+    }
+}
+
+
+
+void ReceiveData(DataItem thing)
+{
+    lock (results)
+    {
+        if (!results.Contains(thing))
+        {
+            results.Add(thing);
+            Console.WriteLine("Data received:" + thing.CaseInsensitiveFilename);
+        }
+    }
+}
+
+
+async void doStuff()
 {
     if (File.Exists(localDirsFile)){
         localDirs = System.IO.File.ReadAllText(localDirsFile);
@@ -32,7 +69,11 @@ void doStuff()
 
     using (DBClass db = new DBClass())
     {
-        //DBHandler.AddFolder(db, new DirectoryInfo(localDirs), true);
+        Task<ResultCode> jawn = DBHandler.AddFolder(db, new DirectoryInfo(localDirs), true);
+
+        while (true) ;
+
+        Console.WriteLine("this shouldn't be visible until after the folder is added!");
 
         if (false) //View DB
         {
@@ -45,17 +86,18 @@ void doStuff()
             }
         }
 
-        if (false) //Generate patterns
+        if (true) //Generate patterns
         {
             if (false) //Delete existing patterns first
             {
-                IQueryable deleteThese = from PatternList in db.PatternLists
+                IQueryable deleteLists = from PatternList in db.PatternLists
                                          select PatternList;
 
-                foreach (PatternList list in deleteThese)
+                foreach (PatternList list in deleteLists)
                 {
                     DBHandler.RemoveItem(db, list);
                 }
+                Console.WriteLine("Existing patterns deleted");
             }
 
             Console.WriteLine("Generating patterns");
@@ -77,7 +119,7 @@ void doStuff()
             Console.WriteLine();
         }
 
-        if (false) //Populate patterns
+        if (true) //Populate patterns
         {
             Console.WriteLine("Populating patterns");
             DBHandler.PopulatePatternLists(db);
@@ -85,19 +127,28 @@ void doStuff()
 
         }
 
-        if (true) //Print contents of a pattern list
+        if (false) //Print contents of a pattern list
         {
             //Get the ID for the list corresponding to "a"
             IQueryable testlist = from PatternList in db.PatternLists
                                   where PatternList.pattern == "a"
                                   select PatternList;
 
+            IQueryable listy = from DataItemPatternList in db.DataItemPatternLists
+                               where DataItemPatternList.PatternList.pattern == "a"
+                               select DataItemPatternList;
+
+            Console.WriteLine("List time:");
+
             long id = 0;
-            foreach (PatternList list in testlist)
+            foreach (DataItemPatternList list in listy)
             {
-                id = list.Id;
-                break;
+                Console.WriteLine("Thingy:" + list.DataItem.CaseInsensitiveFilename);
             }
+
+
+
+            /*
 
             IQueryable resolvelist = from DataItemPatternList in db.DataItemPatternLists
                                       where DataItemPatternList.PatternListId == id
@@ -113,11 +164,36 @@ void doStuff()
                 {
                     Console.WriteLine(atLast.CaseInsensitiveFilename);
                 }
+            */
 
+            
+        }
+
+        if (false) //Test DataItem deletions
+        {
+            foreach (DataItem item in db.DataItems)
+            {
+                DBHandler.RemoveItem(db, item);
             }
+
+            Console.WriteLine("Printing any remaining dataitems:");
+
+            foreach (DataItem item in db.DataItems)
+            {
+                Console.WriteLine(item.CaseInsensitiveFilename);
+            }
+
+            Console.WriteLine("Printing any remaining associations:");
+
+            foreach (DataItemPatternList association in db.DataItemPatternLists)
+            {
+                Console.WriteLine(association.PatternList.pattern);
+            }
+            db.SaveChanges();
         }
     }
 }
+
 
 
 
@@ -137,7 +213,7 @@ void testDB()
     using (var db = new DBClass())
     {
         db.Add(new DataItem { FullPath="ASDF", CaseInsensitiveFilename="asdf"});
-        db.Add(new PatternList { pattern="a", Size = 0});
+        //db.Add(new PatternList { pattern="a", Size = 0});
 
         db.SaveChanges();
 
@@ -155,40 +231,5 @@ void ReadDB()
         {
             Console.WriteLine("jawn:" + item.CaseInsensitiveFilename);
         }
-    }
-}
-
-//Let's try adding a DataItem to a list
-void testLists()
-{
-    using (var db = new DBClass())
-    {
-        var itemQuery = from DataItem in db.DataItems
-                    select DataItem;
-
-        var listQuery = from PatternList in db.PatternLists
-                        select PatternList;
-
-        foreach (var item in itemQuery)
-        {
-            foreach (var list in listQuery)
-            {
-                Console.WriteLine("Listy: " + list.pattern);
-                list.DataItems.Add(item);
-            }
-        }
-
-        Console.WriteLine("jawns added. What's in the jawns?");
-
-        foreach (var list in listQuery)
-        {
-            foreach (var item in list.DataItems)
-            {
-                item.FullPath = "HEHEHEHEEHEHEE";
-                Console.WriteLine(item.CaseInsensitiveFilename);
-            }
-        }
-
-        db.SaveChanges();
     }
 }

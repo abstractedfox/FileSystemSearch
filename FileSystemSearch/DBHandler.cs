@@ -32,17 +32,121 @@ namespace FileSystemSearch
         DUPLICATE_FOUND
     }
 
+    //A class for queueing database actions.
+    //This is meant to enable some aspects of large file additions to work asynchronously while
+    //keeping actual database writes synchronous
+    class DBQueue
+    {
+        List<Task> dbTasks;
+        List<DataItem> dataItemQueue, dataItemNext;
+        DBClass db;
+        bool finished;
+
+        int itemsAdded;
+
+        const bool debug = true;
+
+        public DBQueue(DBClass dbReference)
+        {
+            dbTasks = new List<Task>();
+            dataItemQueue = new List<DataItem>();
+            dataItemNext = new List<DataItem>();
+            db = dbReference;
+            finished = false;
+            _DebugReadout();
+
+            itemsAdded = 0;
+        }
+
+        public async void RunQueue()
+        {
+            await Task.Run(() => {
+                while (true)
+                {
+                    //Run continuously until the caller says it's done sending data.
+                    if (finished == true && dataItemQueue.Count == 0 && dataItemNext.Count == 0) break;
+                    if (dataItemQueue.Count == 0 && dataItemNext.Count == 0) continue;
+
+
+                    //This arrangement is intended to prevent a situation where locking dataItemQueue could defeat the purpose
+                    //of this class by making it perform effectively synchronously.
+                    if (dataItemNext.Count > 0 && dataItemQueue.Count == 0)
+                    {
+                        lock (dataItemNext)
+                        {
+                            foreach (DataItem item in dataItemNext)
+                            {
+                                dataItemQueue.Add(item);
+                            }
+                            //if (debug) _DebugOutAsync("Clearing dataItemNext of " + dataItemNext.Count + " items.");
+                            dataItemNext.Clear();
+                        }
+                    }
+
+                    lock (dataItemQueue)
+                    {
+                        foreach (DataItem item in dataItemQueue)
+                        {
+                            db.Add(item);
+                            itemsAdded++;
+                        }
+                        dataItemQueue.Clear();
+                    }
+                }
+
+                if (debug) Console.WriteLine("DBQueue complete!!!");
+                db.SaveChanges();
+            });
+        }
+
+        public async void AddToQueue(DataItem item)
+        {
+            Task.Run(() =>
+            {
+                lock (dataItemNext)
+                {
+                    dataItemNext.Add(item);
+                }
+            });
+        }
+
+        public async void SetComplete()
+        {
+            finished = true;
+        }
+
+        private async void _DebugReadout()
+        {
+            while (!finished)
+            {
+                await Task.Delay((1000));
+                Console.WriteLine("Queue! Total items: " + itemsAdded);
+                Console.WriteLine("Queue! dataItemQueue count: " + dataItemQueue.Count);
+                Console.WriteLine("Queue! dataItemNext count: " + dataItemNext.Count);
+            }
+        }
+
+        private async void _DebugOutAsync(string output)
+        {
+            await Task.Run(() =>
+            {
+                Console.WriteLine(output);
+            });
+        }
+    }
+
     internal class DBHandler
     {
         //Add the contents of a single folder to the database.
         //Pass 'true' to arg3 to recursively perform this for subdirectories
-        public static ResultCode AddFolder(DBClass db, System.IO.DirectoryInfo folder, bool recursive)
+        public static async Task<ResultCode> AddFolder(DBClass db, System.IO.DirectoryInfo folder, bool recursive)
         {
             System.IO.FileInfo[] files = null;
+            
 
             if (recursive)
             {
-                if (_AddFolderRecursiveContainer(db, folder) == ResultCode.SUCCESS)
+                if (await _AddFolderRecursiveContainer(db, folder) == ResultCode.SUCCESS)
                 {
                     return ResultCode.SUCCESS;
                 }
@@ -69,7 +173,7 @@ namespace FileSystemSearch
                     foreach (System.IO.FileInfo file in files)
                     {
                         DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
-                        if (AddItem(db, item) == ResultCode.DUPLICATE_FOUND)
+                        if (await AddItem(db, item) == ResultCode.DUPLICATE_FOUND)
                         {
                             _DebugOut("AddFolder: Duplicate file found: " + item.FullPath);
                         }
@@ -94,9 +198,9 @@ namespace FileSystemSearch
 
 
         //Pass a DataItem and it will add it to the database. Duplicate check will be performed
-        public static ResultCode AddItem(DBClass db, DataItem item)
+        public static async Task<ResultCode> AddItem(DBClass db, DataItem item)
         {
-            if (!_IsDuplicate(db, item))
+            if (await _IsDuplicate(db, item) == false)
             {
                 db.Add(item);
                 return ResultCode.SUCCESS;
@@ -112,19 +216,29 @@ namespace FileSystemSearch
         //Remove a list
         public static ResultCode RemoveItem(DBClass db, PatternList list)
         {
-            IQueryable items = from PatternList in db.PatternLists
+            IQueryable listToDelete = from PatternList in db.PatternLists
                               where PatternList == list
                               select PatternList;
 
 
-            foreach (PatternList listToDelete in items)
+
+            foreach (PatternList deleteThis in listToDelete)
             {
+
+                IQueryable dataItemPatternListsToDelete = from DataItemPatternList in db.DataItemPatternLists
+                                                          where DataItemPatternList.PatternList == list
+                                                          select DataItemPatternList;
+
+                foreach (DataItemPatternList associationToDelete in dataItemPatternListsToDelete)
+                {
+                    db.Remove(associationToDelete);
+                }
+
                 try
                 {
-                    listToDelete.DataItems.Clear();
-                    Console.WriteLine("jawns: " + listToDelete.DataItems.Count());
+                    Console.WriteLine("Deleting pattern list: " + deleteThis.pattern);
                     
-                    db.Remove(listToDelete);
+                    db.Remove(deleteThis);
                 }
                 catch (Exception e)
                 {
@@ -154,6 +268,16 @@ namespace FileSystemSearch
             }
 
             if (foundItems == 0) return ResultCode.ITEM_NOT_FOUND;
+
+            IQueryable associations = from DataItemPatternList in db.DataItemPatternLists
+                                      where DataItemPatternList.DataItem == item
+                                      select DataItemPatternList;
+
+            foreach (DataItemPatternList associationToDelete in associations)
+            {
+                db.Remove(associationToDelete);
+            }
+
 
             db.Remove(item);
 
@@ -224,12 +348,20 @@ namespace FileSystemSearch
 
                 foreach (DataItem match in matches)
                 {
+                    /*
                     list.DataItems.Add(match);
                     if (verbose)
                     {
                         _DebugOut(debugName + "Match add confirm:" + list.DataItems.Last<DataItem>().CaseInsensitiveFilename);
                         list.Size++;
                     }
+                    */
+
+                    DataItemPatternList association = new DataItemPatternList();
+                    association.DataItem = match;
+                    association.PatternList = list;
+
+                    db.DataItemPatternLists.Add(association);
                 }
             }
 
@@ -250,19 +382,27 @@ namespace FileSystemSearch
         {
 
         }
-
+        
+        public static void test(DBClass db)
+        {
+            _PrintAllFiles(db);
+        }
 
         //**********************Private functions below
 
         //Call this to perform a recursive folder add
-        private static ResultCode _AddFolderRecursiveContainer(DBClass db, System.IO.DirectoryInfo rootFolder)
+        private static async Task<ResultCode> _AddFolderRecursiveContainer(DBClass db, System.IO.DirectoryInfo rootFolder)
         {
             const bool debug = false;
             const string debugName = "_AddFolderRecursiveContainer:";
 
+            DBQueue queue = new DBQueue(db);
+
             List<System.IO.DirectoryInfo> folders = new List<System.IO.DirectoryInfo>();
 
-            _AddFolderRecursive(db, rootFolder, folders);
+            await _AddFolderRecursive(db, rootFolder, folders, queue);
+
+            queue.RunQueue();
 
             while (folders.Count > 0)
             {
@@ -270,8 +410,10 @@ namespace FileSystemSearch
                 {
                     _DebugOut(debugName + "Calling _AddFolderRecursive with :" + folders.Last<DirectoryInfo>().FullName);
                 }
-                _AddFolderRecursive(db, folders.Last<DirectoryInfo>(), folders);
+                await _AddFolderRecursive(db, folders.Last<DirectoryInfo>(), folders, queue);
             }
+
+            queue.SetComplete();
 
             return ResultCode.SUCCESS;
         }
@@ -281,12 +423,20 @@ namespace FileSystemSearch
         //folders found. This function is not to be called directly; _AddFolderRecursiveContainer should be called with the
         //root folder and it will call this as long as more folders are found.
         //True recursion is avoided due to potential stack overflow if there are many directories
-        private static ResultCode _AddFolderRecursive(DBClass db, System.IO.DirectoryInfo folder, List<System.IO.DirectoryInfo> nextFolder)
+        private static async Task<ResultCode> _AddFolderRecursive(DBClass db, System.IO.DirectoryInfo folder, 
+            List<System.IO.DirectoryInfo> nextFolder, DBQueue queue)
         {
-            const bool debug = false;
+            const bool debug = false, verbose = true;
             const string debugName = "_AddFolderRecursive:";
+            
+            
             System.IO.FileInfo[] files = null;
             System.IO.DirectoryInfo[] folders = null;
+
+            if (verbose)
+            {
+                //_DebugOutAsync(debugName + "Adding: " + folder.FullName);
+            }
 
             if (nextFolder.Contains(folder)) nextFolder.Remove(folder);
 
@@ -325,13 +475,16 @@ namespace FileSystemSearch
                     foreach (System.IO.FileInfo file in files)
                     {
                         DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
-                        if (!_IsDuplicate(db, item))
+
+                        if (await _IsDuplicate(db, item) == false || true)
                         {
-                            db.Add(item);
+                            //db.Add(item);
+                            //_DebugOutAsync("we add!!");
+                            queue.AddToQueue(item);
                         }
                         else
                         {
-                            _DebugOut("Duplicate found: " + item.CaseInsensitiveFilename);
+                            _DebugOutAsync("Duplicate found: " + item.CaseInsensitiveFilename);
                         }
                     }
                 }
@@ -370,7 +523,7 @@ namespace FileSystemSearch
                 return ResultCode.DUPLICATE_FOUND;
             }
 
-            PatternList newList = new PatternList { pattern = newPattern, Size = 0 };
+            PatternList newList = new PatternList { pattern = newPattern };
 
             if (debug) _DebugOut(debugName + "New pattern list added: " + newList.pattern);
 
@@ -386,16 +539,16 @@ namespace FileSystemSearch
 
         //Pass a list key in arg2 and arg3. Return value is a logical AND of those lists in the form 
         //of a List<int> of keys
-        private static List<int> ANDLists(DBClass db, long listPKey1, long listPKey2)
+        private static List<int> _ANDLists(DBClass db, long listPKey1, long listPKey2)
         {
             return new List<int>();
         }
 
 
         //Check whether an identical DataItem is already in this database
-        private static bool _IsDuplicate(DBClass db, DataItem itemToCheck)
+        private async static Task<bool> _IsDuplicate(DBClass db, DataItem itemToCheck)
         {
-            
+            bool foundDupe = false;
             //using (db) //this causes issues, maybe because the passed db is already in a using block
             //in a calling function?
             {
@@ -406,16 +559,19 @@ namespace FileSystemSearch
                                       where DataItem.FullPath == itemToCheck.FullPath
                                       select DataItem;
 
-
-                foreach (DataItem item in findDupe)
+                await Task.Run(() =>
                 {
-                    keysFound++;
-                    if (keysFound > 0)
+                    lock (db)
                     {
-                        return true;
+                        foreach (DataItem item in findDupe)
+                        {
+                            foundDupe = true;
+                            break;
+                        }
                     }
-                }
+                });
 
+                if (foundDupe) return true;
                 return false;
 
             }
@@ -473,6 +629,14 @@ namespace FileSystemSearch
         private static void _DebugOut(string debugText)
         {
             Console.WriteLine("DBHandler._DebugOut: " + debugText);
+        }
+
+        private static async void _DebugOutAsync(string debugText)
+        {
+            await Task.Run(() =>
+            {
+                Console.WriteLine(debugText);
+            });
         }
 
         //Prints everything in the DataItems table
