@@ -44,7 +44,7 @@ namespace FileSystemSearch
 
         int itemsAdded;
 
-        const bool debug = true;
+        const bool debug = true, debugLocks = false;
 
         public DBQueue(DBClass dbReference)
         {
@@ -61,12 +61,19 @@ namespace FileSystemSearch
         public async void RunQueue()
         {
             await Task.Run(() => {
+                bool superdebug = false;
                 while (true)
                 {
+
                     //Run continuously until the caller says it's done sending data.
                     if (finished == true && dataItemQueue.Count == 0 && dataItemNext.Count == 0) break;
-                    if (dataItemQueue.Count == 0 && dataItemNext.Count == 0) continue;
+                    if (dataItemQueue.Count == 0 && dataItemNext.Count == 0)
+                    {
+                        //if (superdebug) _DebugOutAsync("dataItemQueue and dataItemNext are both empty. Continuing.");
+                        continue;
+                    }
 
+                    if (superdebug) _DebugOutAsync("Continue");
 
                     //This arrangement is intended to prevent a situation where locking dataItemQueue could defeat the purpose
                     //of this class by making it perform effectively synchronously.
@@ -74,6 +81,7 @@ namespace FileSystemSearch
                     {
                         lock (dataItemNext)
                         {
+                            if (debugLocks) _DebugOutAsync("RunQueue dataItemNext lock");
                             foreach (DataItem item in dataItemNext)
                             {
                                 dataItemQueue.Add(item);
@@ -81,10 +89,12 @@ namespace FileSystemSearch
                             //if (debug) _DebugOutAsync("Clearing dataItemNext of " + dataItemNext.Count + " items.");
                             dataItemNext.Clear();
                         }
+                        if (debugLocks) _DebugOutAsync("RunQueue dataItemNext unlock");
                     }
 
                     lock (dataItemQueue)
                     {
+                        if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue lock");
                         foreach (DataItem item in dataItemQueue)
                         {
                             db.Add(item);
@@ -92,6 +102,7 @@ namespace FileSystemSearch
                         }
                         dataItemQueue.Clear();
                     }
+                    if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue unlock");
                 }
 
                 if (debug) Console.WriteLine("DBQueue complete!!!");
@@ -101,17 +112,21 @@ namespace FileSystemSearch
 
         public async void AddToQueue(DataItem item)
         {
-            Task.Run(() =>
+            bool debugLocks = true;
+            await Task.Run(() =>
             {
                 lock (dataItemNext)
                 {
+                    if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
                     dataItemNext.Add(item);
                 }
+                if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock");
             });
         }
 
         public async void SetComplete()
         {
+            _DebugOutAsync("SetComplete hit!");
             finished = true;
         }
 
@@ -402,7 +417,7 @@ namespace FileSystemSearch
 
             await _AddFolderRecursive(db, rootFolder, folders, queue);
 
-            queue.RunQueue();
+            //queue.RunQueue();
 
             while (folders.Count > 0)
             {
@@ -411,6 +426,11 @@ namespace FileSystemSearch
                     _DebugOut(debugName + "Calling _AddFolderRecursive with :" + folders.Last<DirectoryInfo>().FullName);
                 }
                 await _AddFolderRecursive(db, folders.Last<DirectoryInfo>(), folders, queue);
+            }
+
+            if (debug)
+            {
+                _DebugOutAsync(debugName + "Complete!");
             }
 
             queue.SetComplete();
@@ -426,19 +446,23 @@ namespace FileSystemSearch
         private static async Task<ResultCode> _AddFolderRecursive(DBClass db, System.IO.DirectoryInfo folder, 
             List<System.IO.DirectoryInfo> nextFolder, DBQueue queue)
         {
-            const bool debug = false, verbose = true;
+            const bool debug = false, verbose = true, debugLocks = false;
             const string debugName = "_AddFolderRecursive:";
-            
             
             System.IO.FileInfo[] files = null;
             System.IO.DirectoryInfo[] folders = null;
 
             if (verbose)
             {
-                //_DebugOutAsync(debugName + "Adding: " + folder.FullName);
+                _DebugOutAsync(debugName + "Adding: " + folder.FullName);
             }
 
-            if (nextFolder.Contains(folder)) nextFolder.Remove(folder);
+            lock (nextFolder)
+            {
+                if (debugLocks) _DebugOutAsync(debugName + "Locked: nextFolder");
+                if (nextFolder.Contains(folder)) nextFolder.Remove(folder);
+            }
+            if (debugLocks) _DebugOutAsync(debugName + "Unlocked: nextFolder");
 
             //using (db)
             {
@@ -476,10 +500,11 @@ namespace FileSystemSearch
                     {
                         DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
 
-                        if (await _IsDuplicate(db, item) == false || true)
+                        //if (await _IsDuplicate(db, item) == false)
+                        if (true)
                         {
                             //db.Add(item);
-                            //_DebugOutAsync("we add!!");
+                            _DebugOutAsync("we add!!");
                             queue.AddToQueue(item);
                         }
                         else
@@ -496,7 +521,12 @@ namespace FileSystemSearch
                         DataItem item =
                             new DataItem { FullPath = foundfolder.FullName, CaseInsensitiveFilename = foundfolder.Name.ToLower() };
 
-                        nextFolder.Add(foundfolder);
+                        lock (folders)
+                        {
+                            if (debugLocks) _DebugOutAsync(debugName + "Locked: folders");
+                            nextFolder.Add(foundfolder);
+                        }
+                        if (debugLocks) _DebugOutAsync(debugName + "Unlocked: folders");
 
                         if (debug)
                         {
