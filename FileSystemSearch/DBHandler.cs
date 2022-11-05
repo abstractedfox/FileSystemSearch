@@ -42,7 +42,7 @@ namespace FileSystemSearch
         DBClass db;
         bool finished;
 
-        int itemsAdded;
+        int itemsAdded, debugCounter;
 
         const bool debug = true, debugLocks = false;
 
@@ -56,14 +56,19 @@ namespace FileSystemSearch
             _DebugReadout();
 
             itemsAdded = 0;
+
+            debugCounter = 0;
         }
 
         public async void RunQueue()
         {
             await Task.Run(() => {
                 bool superdebug = false;
+                int interval = 0;
                 while (true)
                 {
+                    interval++;
+                    if (interval % 100000000 == 0) Console.WriteLine("loopy");
 
                     //Run continuously until the caller says it's done sending data.
                     if (finished == true && dataItemQueue.Count == 0 && dataItemNext.Count == 0) break;
@@ -125,14 +130,24 @@ namespace FileSystemSearch
 
         public async void AddToQueue(DataItem item)
         {
-            await Task.Run(() =>
+            //boilerplate debugging
+            if (item == null) Console.WriteLine("FuCK");
+
+            await Task.Run(async () =>
             {
+                int a = debugCounter++;
                 lock (dataItemNext)
                 {
-                    if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
+                    if (debugCounter == 50 && false)
+                    {
+                        Console.WriteLine("schfifty");
+                        debugCounter++;
+                        while (true) ;
+                    }
+                    if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock" + a);
                     dataItemNext.Add(item);
                 }
-                if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock");
+                if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock" + a);
             });
         }
 
@@ -508,6 +523,7 @@ namespace FileSystemSearch
 
                 if (files != null)
                 {
+                    //Console.WriteLine("Enter for!");
                     foreach (System.IO.FileInfo file in files)
                     {
                         DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
@@ -523,7 +539,7 @@ namespace FileSystemSearch
                             _DebugOutAsync("Duplicate found: " + item.CaseInsensitiveFilename);
                         }
                     }
-
+                    //Console.WriteLine("Exit for!");
                 }
 
                 if (folders != null)
