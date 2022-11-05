@@ -81,28 +81,41 @@ namespace FileSystemSearch
                     {
                         lock (dataItemNext)
                         {
-                            if (debugLocks) _DebugOutAsync("RunQueue dataItemNext lock");
-                            foreach (DataItem item in dataItemNext)
+                            lock (dataItemQueue)
                             {
-                                dataItemQueue.Add(item);
+                                if (debugLocks) _DebugOutAsync("RunQueue dataItemNext lock");
+                                foreach (DataItem item in dataItemNext)
+                                {
+                                    dataItemQueue.Add(item);
+                                }
+                                //if (debug) _DebugOutAsync("Clearing dataItemNext of " + dataItemNext.Count + " items.");
+                                dataItemNext.Clear();
                             }
-                            //if (debug) _DebugOutAsync("Clearing dataItemNext of " + dataItemNext.Count + " items.");
-                            dataItemNext.Clear();
                         }
                         if (debugLocks) _DebugOutAsync("RunQueue dataItemNext unlock");
                     }
 
-                    lock (dataItemQueue)
+                    if (true)
                     {
-                        if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue lock");
-                        foreach (DataItem item in dataItemQueue)
+                        if (dataItemQueue.Count > 0)
                         {
-                            db.Add(item);
-                            itemsAdded++;
+                            lock (dataItemQueue)
+                            {
+                                if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue lock");
+                                lock (db)
+                                {
+                                    foreach (DataItem item in dataItemQueue)
+                                    {
+                                        var asdf = db.Add(item);
+                                        itemsAdded++;
+                                    }
+                                }
+                                dataItemQueue.Clear();
+                            }
+                            if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue unlock");
                         }
-                        dataItemQueue.Clear();
                     }
-                    if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue unlock");
+                    
                 }
 
                 if (debug) Console.WriteLine("DBQueue complete!!!");
@@ -112,7 +125,6 @@ namespace FileSystemSearch
 
         public async void AddToQueue(DataItem item)
         {
-            bool debugLocks = true;
             await Task.Run(() =>
             {
                 lock (dataItemNext)
@@ -417,7 +429,7 @@ namespace FileSystemSearch
 
             await _AddFolderRecursive(db, rootFolder, folders, queue);
 
-            //queue.RunQueue();
+            queue.RunQueue();
 
             while (folders.Count > 0)
             {
@@ -446,7 +458,7 @@ namespace FileSystemSearch
         private static async Task<ResultCode> _AddFolderRecursive(DBClass db, System.IO.DirectoryInfo folder, 
             List<System.IO.DirectoryInfo> nextFolder, DBQueue queue)
         {
-            const bool debug = false, verbose = true, debugLocks = false;
+            const bool debug = false, verbose = false, debugLocks = false;
             const string debugName = "_AddFolderRecursive:";
             
             System.IO.FileInfo[] files = null;
@@ -504,7 +516,6 @@ namespace FileSystemSearch
                         if (true)
                         {
                             //db.Add(item);
-                            _DebugOutAsync("we add!!");
                             queue.AddToQueue(item);
                         }
                         else
@@ -512,6 +523,7 @@ namespace FileSystemSearch
                             _DebugOutAsync("Duplicate found: " + item.CaseInsensitiveFilename);
                         }
                     }
+
                 }
 
                 if (folders != null)
@@ -579,32 +591,30 @@ namespace FileSystemSearch
         private async static Task<bool> _IsDuplicate(DBClass db, DataItem itemToCheck)
         {
             bool foundDupe = false;
-            //using (db) //this causes issues, maybe because the passed db is already in a using block
-            //in a calling function?
-            {
-                int keysFound = 0;
+
+            int keysFound = 0;
 
                 
-                IQueryable findDupe = from DataItem in db.DataItems
-                                      where DataItem.FullPath == itemToCheck.FullPath
-                                      select DataItem;
+            IQueryable findDupe = from DataItem in db.DataItems
+                                    where DataItem.FullPath == itemToCheck.FullPath
+                                    select DataItem;
 
-                await Task.Run(() =>
+            //await Task.Run(() =>
+            {
+                lock (db)
                 {
-                    lock (db)
+                    foreach (DataItem item in findDupe)
                     {
-                        foreach (DataItem item in findDupe)
-                        {
-                            foundDupe = true;
-                            break;
-                        }
+                        
+                        foundDupe = true;
+                        break;
                     }
-                });
+                }
+            }//);
 
-                if (foundDupe) return true;
-                return false;
+            if (foundDupe) return true;
+            return false;
 
-            }
         }
 
 
