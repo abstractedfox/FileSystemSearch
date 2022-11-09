@@ -9,6 +9,7 @@ using System.IO;
 using System.ComponentModel.Design.Serialization;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query.Internal;
 
 
 //This class is for performing actions on the database.
@@ -38,13 +39,16 @@ namespace FileSystemSearch
     class DBQueue
     {
         List<Task> dbTasks;
-        List<DataItem> dataItemQueue, dataItemNext;
+        List<DataItem> dataItemQueue, dataItemNext, testlist;
         DBClass db;
         bool finished;
 
         int itemsAdded, debugCounter;
 
         const bool debug = true, debugLocks = false;
+
+        //The caller can read this to determine if operations are still pending before disposing the db instance
+        public bool operationsPending; 
 
         public DBQueue(DBClass dbReference)
         {
@@ -53,23 +57,25 @@ namespace FileSystemSearch
             dataItemNext = new List<DataItem>();
             db = dbReference;
             finished = false;
+            operationsPending = false;
             _DebugReadout();
 
             itemsAdded = 0;
 
             debugCounter = 0;
+
+            testlist = new List<DataItem>();
         }
 
         public async void RunQueue()
         {
             await Task.Run(() => {
+                operationsPending = true;
+
+                bool debugQueueInfo = false;
                 bool superdebug = false;
-                int interval = 0;
                 while (true)
                 {
-                    interval++;
-                    if (interval % 100000000 == 0) Console.WriteLine("loopy");
-
                     //Run continuously until the caller says it's done sending data.
                     if (finished == true && dataItemQueue.Count == 0 && dataItemNext.Count == 0) break;
                     if (dataItemQueue.Count == 0 && dataItemNext.Count == 0)
@@ -88,6 +94,7 @@ namespace FileSystemSearch
                         {
                             lock (dataItemQueue)
                             {
+                                if (debugQueueInfo) _DebugOutAsync("Flushing " + dataItemNext.Count + " from dataItemNext");
                                 if (debugLocks) _DebugOutAsync("RunQueue dataItemNext lock");
                                 foreach (DataItem item in dataItemNext)
                                 {
@@ -100,58 +107,54 @@ namespace FileSystemSearch
                         if (debugLocks) _DebugOutAsync("RunQueue dataItemNext unlock");
                     }
 
-                    if (true)
+                    if (dataItemQueue.Count > 0)
                     {
-                        if (dataItemQueue.Count > 0)
+                        lock (dataItemQueue)
                         {
-                            lock (dataItemQueue)
+                            if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue lock");
+                            lock (db)
                             {
-                                if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue lock");
-                                lock (db)
+                                foreach (DataItem item in dataItemQueue)
                                 {
-                                    foreach (DataItem item in dataItemQueue)
-                                    {
-                                        var asdf = db.Add(item);
-                                        itemsAdded++;
-                                    }
+                                    db.Add(item);
+                                    //testlist.Add(item);
+                                    itemsAdded++;
                                 }
-                                dataItemQueue.Clear();
                             }
-                            if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue unlock");
+                            dataItemQueue.Clear();
                         }
+                        if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue unlock");
                     }
-                    
+
+
+                }
+                testlist.Clear();
+                if (debug) Console.WriteLine("DBQueue complete!!! Items added: " + itemsAdded);
+                lock (db)
+                {
+                    db.SaveChanges();
+                    operationsPending = false;
                 }
 
-                if (debug) Console.WriteLine("DBQueue complete!!!");
-                db.SaveChanges();
+                
             });
         }
 
         public async void AddToQueue(DataItem item)
         {
-            //boilerplate debugging
-            if (item == null) Console.WriteLine("FuCK");
-
-            await Task.Run(async () =>
+            //We don't want the caller loop to block waiting for this to return
+            Task.Run(() =>
             {
-                int a = debugCounter++;
                 lock (dataItemNext)
                 {
-                    if (debugCounter == 50 && false)
-                    {
-                        Console.WriteLine("schfifty");
-                        debugCounter++;
-                        while (true) ;
-                    }
-                    if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock" + a);
+                    if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
                     dataItemNext.Add(item);
                 }
-                if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock" + a);
+                if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock");
             });
         }
 
-        public async void SetComplete()
+        public void SetComplete()
         {
             _DebugOutAsync("SetComplete hit!");
             finished = true;
@@ -177,6 +180,214 @@ namespace FileSystemSearch
         }
     }
 
+
+    //A class for sorting items into pattern lists and checking for duplicates.
+    //This is a stateful class; it must be instantiated. This is done so the caller can cancel running operations without
+    //waiting for them to finish
+    class Housekeeping
+    {
+        const bool debug = true;
+
+        DBClass db;
+        int taskLimit;
+        List<Task> runningTasks;
+        bool cancelHousekeeping, isHousekeeping;
+
+        public delegate void ResultReturn(DataItem result, ResultCode code);
+
+        public Housekeeping(DBClass dbToUse)
+        {
+            runningTasks = new List<Task>();
+            db = dbToUse;
+            taskLimit = 8;
+            isHousekeeping = false;
+            cancelHousekeeping = false;
+        }
+
+        public async Task StartHousekeeping(ResultReturn resultOut)
+        {
+            const bool debug = true;
+            const string debugName = "Housekeeping.StartHousekeeping():";
+
+            if (debug) _debugOut(debugName + "Start");
+
+            if (isHousekeeping == true)
+            {
+                if (debug) _debugOut(debugName + "StartHousekeeping is already running.");
+                return;
+            }
+
+            isHousekeeping = true;
+            await Task.Run(() => {
+                while (!cancelHousekeeping)
+                {
+                    IQueryable unprocessedFiles = from DataItem in db.DataItems
+                                                  where DataItem.HasBeenProcessed == false
+                                                  select DataItem;
+
+                    List<DataItem> itemsToProcess = new List<DataItem>();
+
+                    foreach (DataItem item in unprocessedFiles)
+                    {
+                        itemsToProcess.Add(item);
+                    }
+
+                    if (debug) _debugOut(debugName + "Unprocessed files listulated, beginning processing process.");
+
+
+                    for (int i = 0; i < itemsToProcess.Count; i++)
+                    {
+                        while (GetPendingTasks() > taskLimit) ; //Block if the task limit is hit
+                        _processFile(itemsToProcess[i], resultOut);
+                    }
+                }
+                isHousekeeping = false;
+                if (debug) _debugOut(debugName + "Housekeeping has ended.");
+            });
+        }
+
+        public void CancelHousekeeping()
+        {
+            const bool debug = true;
+            if (debug) _debugOut("CancelHousekeeping called");
+            cancelHousekeeping = true;
+        }
+
+        //Check a single file for duplicates and add it to pattern lists. sourceList is the list of DataItems that is supplying
+        //this function; if a duplicate is found, this function will remove it on its own.
+        private async void _processFile(DataItem item, ResultReturn resultOut)
+        {
+            const bool debug = true;
+            const string debugName = "Housekeeping._processFile():";
+            runningTasks.Add(Task.Run(() => {
+                if (debug) _debugOut(debugName + "Processing " + item.FullPath);
+
+                if (_isDuplicate(item))
+                {
+                    if (debug) _debugOut(debugName + "Duplicate found: " + item.FullPath);
+                    resultOut(item, ResultCode.DUPLICATE_FOUND);
+                    lock (db)
+                    {
+                        DBHandler.RemoveItem(db, item);
+                    }
+                    return;
+                }
+
+                if (debug) _debugOut(debugName + "Checking for new pattern lists.");
+
+                //Check whether any new pattern lists need to be made
+                for (int i = 0; i < item.CaseInsensitiveFilename.Count(); i++)
+                {
+                    if (DataSearch.FindMatchingPatternLists(db, item.CaseInsensitiveFilename[i].ToString()).Count() == 0)
+                    {
+                        lock (db)
+                        {
+                            ResultCode result = DBHandler.CreatePatternList(db, item.CaseInsensitiveFilename[i].ToString());
+                        }
+                    }
+                }
+
+                if (debug) _debugOut(debugName + "Building pattern list associations.");
+
+                //Create any necessary associations with pattern lists
+                List<PatternList> relevantLists = DataSearch.FindMatchingPatternLists(db, item.CaseInsensitiveFilename);
+
+                foreach (PatternList list in relevantLists)
+                {
+                    DataItemPatternList association = new DataItemPatternList();
+                    association.DataItem = item;
+                    association.PatternList = list;
+                    lock (db)
+                    {
+                        db.DataItemPatternLists.Add(association);
+                    }
+                }
+
+                lock (db)
+                {
+                    item.HasBeenProcessed = true; //We're gonna have to make sure this is actually updating the db
+                }
+
+                if (debug) _debugOut(debugName + "Done");
+            }));
+        }
+
+        public int GetPendingTasks()
+        {
+            int results = 0;
+
+            for (int i = 0; i < runningTasks.Count; i++)
+            {
+
+                if (runningTasks[i].IsCompleted == false) results++;
+                /*
+                if (runningTasks.Count > 500)
+                {
+                    RemoveCompletedTasks();
+                }
+                */
+            }
+            /*
+            foreach (Task task in runningTasks)
+            {
+                if (task.IsCompleted == false) results++;
+                if (runningTasks.Count > 500)
+                {
+                    RemoveCompletedTasks();
+                }
+            }
+            */
+            return results;
+        }
+
+        public async void RemoveCompletedTasks()
+        {
+            const string debugName = "Housekeeping.RemoveCompletedTasks():";
+            await Task.Run(() =>
+            {
+                _debugOut(debugName + "Flushing completed tasks");
+                lock (runningTasks)
+                {
+                    for (int i = runningTasks.Count - 1; i > 0; i--) {
+                        if (runningTasks[i].IsCompleted) runningTasks.RemoveAt(i);
+                    }
+                }
+            });
+        }
+
+        private async void _debugOut(string debugText)
+        {
+            await Task.Run(() => { Console.WriteLine(debugText); });
+        }
+
+        private bool _isDuplicate(DataItem item)
+        {
+            //This should be replaced once search functionality is in better shape
+            IQueryable dupeCheck = from DataItem in db.DataItems
+                                   where DataItem.FullPath == item.FullPath && DataItem.Id != item.Id
+                                   select DataItem;
+
+            bool foundDupe = false;
+
+            lock (db)
+            {
+                foreach (DataItem possibledupe in dupeCheck)
+                {
+                    foundDupe = true;
+                    break;
+                }
+            }
+
+            return foundDupe;
+        }
+
+        //Placeholder handler, this functionality isn't used yet
+        private async void _multipleDuplicatesFound(DataItem item)
+        {
+            _debugOut("Multiple duplicates were found of " + item);
+        }
+    }
+
     internal class DBHandler
     {
         //Add the contents of a single folder to the database.
@@ -194,40 +405,43 @@ namespace FileSystemSearch
                 }
                 else return ResultCode.FAIL;
             }
-                        //using (db)
+                       
+            try
             {
-                try
-                {
-                    files = folder.GetFiles("*");
-                    if (files == null) return ResultCode.SUCCESS;
-                }
-                catch (UnauthorizedAccessException e)
-                {
-                    _UnauthorizedFileHandler(e);
-                }
-                catch (Exception e)
-                {
-                    _MiscExceptionHandler(e);
-                }
-
-                if (files != null)
-                {
-                    foreach (System.IO.FileInfo file in files)
-                    {
-                        DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
-                        if (await AddItem(db, item) == ResultCode.DUPLICATE_FOUND)
-                        {
-                            _DebugOut("AddFolder: Duplicate file found: " + item.FullPath);
-                        }
-
-                    }
-                }
-
-                db.SaveChanges();
-
-                return ResultCode.SUCCESS;
-
+                files = folder.GetFiles("*");
+                if (files == null) return ResultCode.SUCCESS;
             }
+            catch (UnauthorizedAccessException e)
+            {
+                _UnauthorizedFileHandler(e);
+            }
+            catch (Exception e)
+            {
+                _MiscExceptionHandler(e);
+            }
+
+            if (files != null)
+            {
+                foreach (System.IO.FileInfo file in files)
+                {
+                    DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
+                    if (await AddItem(db, item) == ResultCode.DUPLICATE_FOUND)
+                    {
+                        _DebugOut("AddFolder: Duplicate file found: " + item.FullPath);
+                    }
+
+                }
+            }
+
+            lock (db)
+            {
+                db.SaveChanges();
+            }
+
+
+
+            return ResultCode.SUCCESS;
+
         }
 
 
@@ -242,15 +456,16 @@ namespace FileSystemSearch
         //Pass a DataItem and it will add it to the database. Duplicate check will be performed
         public static async Task<ResultCode> AddItem(DBClass db, DataItem item)
         {
-            if (await _IsDuplicate(db, item) == false)
+            //Dupe check overhaul coming later, see planning doc
+            //if (await _IsDuplicate(db, item) == false)
             {
                 db.Add(item);
                 return ResultCode.SUCCESS;
             }
-            else
+            //else
             {
                 //_DebugOut("Duplicate found: " + item.CaseInsensitiveFilename);
-                return ResultCode.DUPLICATE_FOUND;
+            //    return ResultCode.DUPLICATE_FOUND;
             }
         }
 
@@ -271,7 +486,7 @@ namespace FileSystemSearch
                                                           where DataItemPatternList.PatternList == list
                                                           select DataItemPatternList;
 
-                foreach (DataItemPatternList associationToDelete in dataItemPatternListsToDelete)
+                foreach (DataItem associationToDelete in dataItemPatternListsToDelete)
                 {
                     db.Remove(associationToDelete);
                 }
@@ -311,11 +526,13 @@ namespace FileSystemSearch
 
             if (foundItems == 0) return ResultCode.ITEM_NOT_FOUND;
 
+            
             IQueryable associations = from DataItemPatternList in db.DataItemPatternLists
                                       where DataItemPatternList.DataItem == item
                                       select DataItemPatternList;
+            
 
-            foreach (DataItemPatternList associationToDelete in associations)
+            foreach (DataItem associationToDelete in associations)
             {
                 db.Remove(associationToDelete);
             }
@@ -324,7 +541,7 @@ namespace FileSystemSearch
             db.Remove(item);
 
             db.SaveChanges();
-
+            
             return ResultCode.SUCCESS;
         }
 
@@ -346,6 +563,32 @@ namespace FileSystemSearch
         }
 
 
+        //Create a new pattern list. Performs duplicate check.
+        public static ResultCode CreatePatternList(DBClass db, string newPattern)
+        {
+            const bool debug = true;
+            const string debugName = "_CreatePatternList:";
+
+            if (_IsDuplicate(db, newPattern))
+            {
+                return ResultCode.DUPLICATE_FOUND;
+            }
+
+            PatternList newList = new PatternList { pattern = newPattern };
+
+            if (debug) _DebugOut(debugName + "New pattern list added: " + newList.pattern);
+
+            db.Add(newList);
+
+            db.SaveChanges();
+            //this has to be done here or the next duplicate check will check the DB on disk and miss
+            //a possible duplicate
+
+            return ResultCode.SUCCESS;
+        }
+
+
+
         //Generate pattern lists based on common patterns. This will only create lists, it doesn't populate them
         public static void GeneratePatterns(DBClass db)
         {
@@ -359,7 +602,7 @@ namespace FileSystemSearch
             {
                 for (int character = 0; character < item.CaseInsensitiveFilename.Count(); character++)
                 {
-                    ResultCode result = _CreatePatternList(db, item.CaseInsensitiveFilename[character].ToString());
+                    ResultCode result = CreatePatternList(db, item.CaseInsensitiveFilename[character].ToString());
                     //if (result == ResultCode.DUPLICATE_FOUND) _DebugOut("Dupey!!!!");
                 }
             }
@@ -390,14 +633,6 @@ namespace FileSystemSearch
 
                 foreach (DataItem match in matches)
                 {
-                    /*
-                    list.DataItems.Add(match);
-                    if (verbose)
-                    {
-                        _DebugOut(debugName + "Match add confirm:" + list.DataItems.Last<DataItem>().CaseInsensitiveFilename);
-                        list.Size++;
-                    }
-                    */
 
                     DataItemPatternList association = new DataItemPatternList();
                     association.DataItem = match;
@@ -405,6 +640,7 @@ namespace FileSystemSearch
 
                     db.DataItemPatternLists.Add(association);
                 }
+
             }
 
             db.SaveChanges();
@@ -444,7 +680,7 @@ namespace FileSystemSearch
 
             await _AddFolderRecursive(db, rootFolder, folders, queue);
 
-            queue.RunQueue();
+            if (folders.Count > 0) queue.RunQueue();
 
             while (folders.Count > 0)
             {
@@ -455,12 +691,15 @@ namespace FileSystemSearch
                 await _AddFolderRecursive(db, folders.Last<DirectoryInfo>(), folders, queue);
             }
 
+
             if (debug)
             {
                 _DebugOutAsync(debugName + "Complete!");
             }
 
             queue.SetComplete();
+
+            while (queue.operationsPending) ; //Block until pending operations are completed
 
             return ResultCode.SUCCESS;
         }
@@ -523,23 +762,28 @@ namespace FileSystemSearch
 
                 if (files != null)
                 {
-                    //Console.WriteLine("Enter for!");
+
                     foreach (System.IO.FileInfo file in files)
                     {
                         DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
 
                         //if (await _IsDuplicate(db, item) == false)
-                        if (true)
                         {
                             //db.Add(item);
                             queue.AddToQueue(item);
                         }
+                        /*
                         else
                         {
                             _DebugOutAsync("Duplicate found: " + item.CaseInsensitiveFilename);
                         }
+                        */
                     }
-                    //Console.WriteLine("Exit for!");
+
+                }
+                else
+                {
+                    if (debug) _DebugOutAsync("No files found in " + folder.FullName + " or files is null for some other reason.");
                 }
 
                 if (folders != null)
@@ -563,35 +807,17 @@ namespace FileSystemSearch
                     }
                 }
 
-                db.SaveChanges();
-
+                //This has been moved to DBQueue.RunQueue()
+                /*
+                await Task.Run(() => { 
+                    lock (db)
+                    {
+                        db.SaveChanges();
+                    }
+                });
+                */
                 return ResultCode.SUCCESS;
             }
-        }
-
-
-        //Create a new pattern list. Performs duplicate check.
-        private static ResultCode _CreatePatternList(DBClass db, string newPattern)
-        {
-            const bool debug = true;
-            const string debugName = "_CreatePatternList:";
-
-            if (_IsDuplicate(db, newPattern))
-            {
-                return ResultCode.DUPLICATE_FOUND;
-            }
-
-            PatternList newList = new PatternList { pattern = newPattern };
-
-            if (debug) _DebugOut(debugName + "New pattern list added: " + newList.pattern);
-
-            db.Add(newList);
-
-            db.SaveChanges(); 
-            //this has to be done here or the next duplicate check will check the DB on disk and miss
-            //a possible duplicate
-
-            return ResultCode.SUCCESS;
         }
 
 
@@ -615,18 +841,16 @@ namespace FileSystemSearch
                                     where DataItem.FullPath == itemToCheck.FullPath
                                     select DataItem;
 
-            //await Task.Run(() =>
+            await Task.Run(() =>
             {
-                lock (db)
                 {
                     foreach (DataItem item in findDupe)
                     {
-                        
                         foundDupe = true;
                         break;
                     }
                 }
-            }//);
+            });
 
             if (foundDupe) return true;
             return false;

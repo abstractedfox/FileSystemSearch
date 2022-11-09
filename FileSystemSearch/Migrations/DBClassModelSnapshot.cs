@@ -28,6 +28,9 @@ namespace FileSystemSearch.Migrations
                     b.Property<string>("FullPath")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("HasBeenProcessed")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.ToTable("DataItems");

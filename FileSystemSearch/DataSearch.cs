@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 using Microsoft.Data.Sqlite;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 namespace FileSystemSearch
 {
@@ -59,6 +60,8 @@ namespace FileSystemSearch
 
 
         //Search a single pattern list for a query.
+        //This may no longer be necessary (deletion candidate)
+        /*
         public static async Task PatternListSearch(DBClass db, string query, ResultReturn receiveData, PatternList list)
         {
             const string debugName = "DataSearch.PatternListSearch:";
@@ -120,49 +123,158 @@ namespace FileSystemSearch
 
 
         }
+        */
 
+        //Search 'setToSearch' for 'query'. receiveData will be called with any results found
+        public static async Task<Task> DataItemListSearchAsync(DBClass db, string query, ResultReturn receiveData, List<DataItem> setToSearch)
+        {
+            //This should return a task so the caller can keep track of how many concurrent search tasks are running
+            return Task.Run(() =>
+            {
+                foreach (DataItem item in setToSearch)
+                {
+                    if (item.CaseInsensitiveFilename.Contains(query))
+                    {
+                        receiveData(item);
+                    }
+                }
+            });
+        }
 
         //Search by scaling pattern lists first
+        //Currently in flux, do not use
         public static async Task SmartSearch(DBClass db, string query, ResultReturn receiveData, int taskLimit)
         {
-            List<PatternList> lists = _FindMatchingPatternLists(db, query);
-            List<Task> tasks = new List<Task>();
+            const bool debug = true;
+            const string debugName = "DataSearch.SmartSearch:";
 
-            if (lists.Count == 0) return;
+
+            if (debug)
+            {
+                _DebugOut(debugName + "Start");
+            }
 
             
+            List<Task> tasks = new List<Task>();
 
-
-            foreach (PatternList list in lists)
+            /*
+            foreach (DataItem item in items)
             {
                 while (_GetRemainingTasks(tasks) >= taskLimit) ; //Block if the task limit is reached
                 lock (tasks)
                 {
-                    tasks.Add(PatternListSearch(db, query, receiveData, list));
+                    tasks.Add(DataItemListSearchAsync(db, query, receiveData, items));
                 }
 
             }
+            */
         }
 
+        //Testing the speed of well-structured queries
+        public static async Task<Task> GoodQueryingTest(DBClass db, string query, ResultReturn receiveData)
+        {
+            const bool debug = true;
+            const string debugName = "DataSearch.GoodQueryingTest:";
+
+            if (debug) _DebugOut(debugName + "Called");
+
+            /*
+            IQueryable queryResults = from DataItemPatternList in db.DataItemPatternLists
+                                      where query.Contains(DataItemPatternList.PatternList.pattern)
+                                      select DataItemPatternList.DataItem;
+            */
+
+            IQueryable queryResults = from DataItemPatternList in db.DataItemPatternLists
+                                      where DataItemPatternList.DataItem.CaseInsensitiveFilename.Contains(query.ToLower())
+                                      select DataItemPatternList.DataItem;
+
+
+            await Task.Run(() =>
+            {
+                Console.WriteLine("squagiel!");
+                foreach (DataItem item in queryResults)
+                {
+                    receiveData(item);
+                }
+                Console.WriteLine("brangie.");
+            });
+
+            return new Task(() => { Console.WriteLine("tasky"); } );
+
+        }
+
+        //Possibly temporary pattern, returns all DataItems associated with a pattern list
+        public static List<DataItem> GetPatternListContents(DBClass db, PatternList list)
+        {
+            IQueryable listContents = from DataItemPatternList in db.DataItemPatternLists
+                                      where DataItemPatternList.PatternList.pattern == list.pattern
+                                      select DataItemPatternList.DataItem;
+
+            List<DataItem> results = new List<DataItem>();
+            
+            foreach (DataItem item in listContents)
+            {
+                results.Add(item);
+            }
+
+            return results;
+        }
+
+        public static async Task<Task> SearchListOfDataItems(DBClass db, string query, List<DataItem> itemsToSearch, ResultReturn receiveData)
+        {
+            return new Task(() =>
+            {
+                foreach (DataItem item in itemsToSearch)
+                {
+                    try
+                    {
+                        if (item.CaseInsensitiveFilename.Contains(query)) receiveData(item);
+                    }
+                    catch (NullReferenceException e)
+                    {
+                        _NullReferenceExceptionHandler();
+                    }
+                }
+            });
+        }
+
+
+        //Returns the pattern lists that are relevant to a query.
+        public static List<PatternList> FindMatchingPatternLists(DBClass db, string query)
+        {
+            List<PatternList> foundLists = new List<PatternList>();
+
+            IQueryable relevantLists = from PatternList in db.PatternLists
+                                       where query.Contains(PatternList.pattern)
+                                       select PatternList;
+
+            lock (db)
+            {
+                foreach (PatternList list in relevantLists) foundLists.Add(list);
+            }
+
+            return foundLists;
+        }
 
 
         //*********************Private methods
 
-        //Find pattern lists that match a query
-        private static List<PatternList> _FindMatchingPatternLists(DBClass db, string query)
+        //Perform a search by looking for relvant pattern lists
+        private static async Task<Task> _GetPatternListContents(DBClass db, string query, ResultReturn receiveData)
         {
-            IQueryable patternLists = from PatternList in db.PatternLists
-                                      where query.Contains(PatternList.pattern)
-                                      select PatternList;
+            IQueryable queryResults = from DataItemPatternList in db.DataItemPatternLists
+                                      where query.Contains(DataItemPatternList.PatternList.pattern)
+                                      select DataItemPatternList.DataItem;
 
-            List<PatternList> results = new List<PatternList>();
+            //List<DataItem> results = new List<DataItem>();
 
-            foreach (PatternList list in patternLists)
-            {
-                results.Add(list);
-            }
+            return new Task(() => {
+                foreach (DataItem item in queryResults)
+                {
+                    receiveData(item);
+                }
+            });
 
-            return results;
         }
 
         private static void _DebugOut(string debugText)

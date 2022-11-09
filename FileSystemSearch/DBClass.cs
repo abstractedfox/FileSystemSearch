@@ -36,11 +36,12 @@ namespace FileSystemSearch
         public string? CaseInsensitiveFilename { get; set; }
         public string? FullPath { get; set; }
 
-        //public ICollection<PatternList> PatternLists { get; set; }
+        //Set this flag to true once an entry has been duplicate-checked and sorted to pattern lists
+        public bool HasBeenProcessed { get; set; }
 
         public DataItem()
         {
-            //PatternLists = new List<PatternList>();
+            HasBeenProcessed = false;
         }
 
     }
@@ -52,15 +53,13 @@ namespace FileSystemSearch
 
         public string? pattern { get; set; }
 
-        //public ICollection<DataItem> DataItems { get; set; }
-
         public PatternList()
         {
-            //this.DataItems = new List<DataItem>();
         }
     }
 
     //association table
+    //Yes it's necessary to do it this way; these can be deleted without having constraint issues with the DataItems table
     public class DataItemPatternList
     {
         [Key]

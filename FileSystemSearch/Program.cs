@@ -1,5 +1,6 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+
 using System;
 using System.Linq;
 using System.Collections.Generic;
@@ -13,6 +14,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 //This file is temporary and will probably be super boilerplatey
 
 Console.WriteLine("Hello, World!");
+
 
 string currentDir = System.IO.Directory.GetCurrentDirectory();
 string localDirsFile = System.IO.Path.Join(currentDir, "localpaths.txt");
@@ -28,23 +30,30 @@ List<DataItem> results = new List<DataItem>();
 
 doStuff();
 
+Console.WriteLine("doStuff is over");
 
 
 while (true)
 {
-    await Task.Delay(20000);
+    //Console.WriteLine("asdf");
+    await Task.Delay(6000);
 }
 
 async void testSearch()
 {
+    List<Task> tasks = new List<Task>();
 
+    string query = "asdf";
     using (DBClass db = new DBClass())
     {
+        tasks.Add(DataSearch.GoodQueryingTest(db, query, ReceiveData));
+        while (true) ;
 
-        //await DataSearch.QuerySearch(db, "adobe", ReceiveData);
-        await DataSearch.SmartSearch(db, "adobe", ReceiveData, 8);
+        Console.WriteLine("done");
     }
 }
+
+
 
 
 
@@ -60,6 +69,18 @@ void ReceiveData(DataItem thing)
     }
 }
 
+void ReceiveDataResultCode(DataItem thing, ResultCode code)
+{
+    lock (results)
+    {
+        if (!results.Contains(thing))
+        {
+            results.Add(thing);
+            Console.WriteLine("Data received (" + code.ToString() + "):" + thing.CaseInsensitiveFilename);
+        }
+    }
+}
+
 
 async void doStuff()
 {
@@ -67,15 +88,29 @@ async void doStuff()
         localDirs = System.IO.File.ReadAllText(localDirsFile);
     }
 
-    using (DBClass db = new DBClass())
+    if (true) //Create the db
     {
-        Task<ResultCode> jawn = DBHandler.AddFolder(db, new DirectoryInfo(localDirs), true);
+        using (DBClass db = new DBClass())
+        {
+            Task<ResultCode> jawn = DBHandler.AddFolder(db, new DirectoryInfo(localDirs), true);
+            await jawn;
+        }
+    }
 
+    Console.WriteLine("folder add is DONEZO");
+
+    //Use the new housekeeping class!
+    using (DBClass db = new DBClass()) {
+        Housekeeping dostuff = new Housekeeping(db);
+        await dostuff.StartHousekeeping(ReceiveDataResultCode);
+
+        Console.WriteLine("WE DONE maybe");
         while (true) ;
+    }
 
-        Console.WriteLine("this shouldn't be visible until after the folder is added!");
-
-        if (false) //View DB
+    if (false) //View DB
+    {
+        using (DBClass db = new DBClass())
         {
             IQueryable viewFiles = from DataItem in db.DataItems
                                    select DataItem;
@@ -85,8 +120,11 @@ async void doStuff()
                 Console.WriteLine("File: " + file.CaseInsensitiveFilename);
             }
         }
+    }
 
-        if (true) //Generate patterns
+    if (false) //Generate patterns
+    {
+        using (DBClass db = new DBClass())
         {
             if (false) //Delete existing patterns first
             {
@@ -103,9 +141,13 @@ async void doStuff()
             Console.WriteLine("Generating patterns");
             DBHandler.GeneratePatterns(db);
             Console.WriteLine("Patterns generated");
+            db.SaveChanges();
         }
+    }
 
-        if (true) //Show patterns
+    if (false) //Show patterns
+    {
+        using (DBClass db = new DBClass())
         {
             IQueryable patternoutcome = from PatternList in db.PatternLists
                                         select PatternList;
@@ -118,16 +160,22 @@ async void doStuff()
             }
             Console.WriteLine();
         }
+    }
 
-        if (true) //Populate patterns
-        {
+    if (false) //Populate patterns
+    {
+        using (DBClass db = new DBClass()) {
             Console.WriteLine("Populating patterns");
             DBHandler.PopulatePatternLists(db);
             Console.WriteLine("Done populating patterns");
-
+            db.SaveChanges();
         }
 
-        if (false) //Print contents of a pattern list
+    }
+
+    if (false) //Print contents of a pattern list
+    {
+        using (DBClass db = new DBClass())
         {
             //Get the ID for the list corresponding to "a"
             IQueryable testlist = from PatternList in db.PatternLists
@@ -151,25 +199,27 @@ async void doStuff()
             /*
 
             IQueryable resolvelist = from DataItemPatternList in db.DataItemPatternLists
-                                      where DataItemPatternList.PatternListId == id
-                                      select DataItemPatternList;
+                                        where DataItemPatternList.PatternListId == id
+                                        select DataItemPatternList;
 
             foreach (DataItemPatternList list in resolvelist)
             {
                 IQueryable getData = from DataItem in db.DataItems
-                                     where DataItem.Id == list.DataItemId
-                                     select DataItem;
+                                        where DataItem.Id == list.DataItemId
+                                        select DataItem;
 
                 foreach (DataItem atLast in getData)
                 {
                     Console.WriteLine(atLast.CaseInsensitiveFilename);
                 }
             */
-
-            
         }
+            
+    }
 
-        if (false) //Test DataItem deletions
+    if (false) //Test DataItem deletions
+    {
+        using (DBClass db = new DBClass())
         {
             foreach (DataItem item in db.DataItems)
             {
@@ -192,6 +242,7 @@ async void doStuff()
             db.SaveChanges();
         }
     }
+
 }
 
 
