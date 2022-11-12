@@ -28,7 +28,7 @@ namespace FileSystemSearch.Migrations
                     b.Property<string>("FullPath")
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("HasBeenProcessed")
+                    b.Property<bool>("HasBeenDuplicateChecked")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");

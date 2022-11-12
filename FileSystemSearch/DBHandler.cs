@@ -222,14 +222,17 @@ namespace FileSystemSearch
                 while (!cancelHousekeeping)
                 {
                     IQueryable unprocessedFiles = from DataItem in db.DataItems
-                                                  where DataItem.HasBeenProcessed == false
+                                                  where DataItem.HasBeenDuplicateChecked == false
                                                   select DataItem;
 
                     List<DataItem> itemsToProcess = new List<DataItem>();
 
-                    foreach (DataItem item in unprocessedFiles)
+                    lock (db)
                     {
-                        itemsToProcess.Add(item);
+                        foreach (DataItem item in unprocessedFiles)
+                        {
+                            itemsToProcess.Add(item);
+                        }
                     }
 
                     if (debug) _debugOut(debugName + "Unprocessed files listulated, beginning processing process.");
@@ -237,7 +240,7 @@ namespace FileSystemSearch
 
                     for (int i = 0; i < itemsToProcess.Count; i++)
                     {
-                        while (GetPendingTasks() > taskLimit) ; //Block if the task limit is hit
+                        //while (GetPendingTasks() > taskLimit) ; //Block if the task limit is hit
                         _processFile(itemsToProcess[i], resultOut);
                     }
                 }
@@ -305,7 +308,7 @@ namespace FileSystemSearch
 
                 lock (db)
                 {
-                    item.HasBeenProcessed = true; //We're gonna have to make sure this is actually updating the db
+                    item.HasBeenDuplicateChecked = true; //We're gonna have to make sure this is actually updating the db
                 }
 
                 if (debug) _debugOut(debugName + "Done");

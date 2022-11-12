@@ -37,11 +37,11 @@ namespace FileSystemSearch
         public string? FullPath { get; set; }
 
         //Set this flag to true once an entry has been duplicate-checked and sorted to pattern lists
-        public bool HasBeenProcessed { get; set; }
+        public bool HasBeenDuplicateChecked { get; set; }
 
         public DataItem()
         {
-            HasBeenProcessed = false;
+            HasBeenDuplicateChecked = false;
         }
 
     }

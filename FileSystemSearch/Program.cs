@@ -102,6 +102,7 @@ async void doStuff()
     //Use the new housekeeping class!
     using (DBClass db = new DBClass()) {
         Housekeeping dostuff = new Housekeeping(db);
+
         await dostuff.StartHousekeeping(ReceiveDataResultCode);
 
         Console.WriteLine("WE DONE maybe");
