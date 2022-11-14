@@ -26,10 +26,9 @@ string DbPath = System.IO.Path.Join(path, "database.db");
 
 List<DataItem> results = new List<DataItem>();
 
-//testSearch();
+testSearch();
 
-doStuff();
-
+//doStuff();
 Console.WriteLine("doStuff is over");
 
 
@@ -43,13 +42,97 @@ async void testSearch()
 {
     List<Task> tasks = new List<Task>();
 
-    string query = "asdf";
+    string query = "my humps";
     using (DBClass db = new DBClass())
     {
-        tasks.Add(DataSearch.GoodQueryingTest(db, query, ReceiveData));
+        tasks.Add(DataSearch.DirectQuerySearch(db, query, ReceiveData));
         while (true) ;
 
         Console.WriteLine("done");
+    }
+}
+
+//Is it more efficient to keep data from the database in memory? (yes, but it uses a lot more memory)
+void testDBInstancing()
+{
+    List<DataItem> items = new List<DataItem>();
+
+    using (DBClass db = new DBClass())
+    {
+        string query = "asdf";
+
+        if (false) //Test searching items already in memory
+        {
+            IQueryable stuff = from DataItem in db.DataItems select DataItem;
+            foreach (DataItem item in stuff) items.Add(item);
+
+            Console.WriteLine("ok"); 
+
+            foreach (DataItem item in items)
+            {
+                if (item.CaseInsensitiveFilename.Contains(query)) Console.WriteLine(item.CaseInsensitiveFilename);
+            }
+
+            Console.WriteLine("done");
+
+            //Once pre-loaded into memory, this search took 20ms
+        }
+
+        if (false) //test doing a raw query
+        {
+            IQueryable querySpeedTest = from DataItem in db.DataItems
+                                        where DataItem.CaseInsensitiveFilename.Contains(query)
+                                        select DataItem;
+
+            foreach (DataItem item in querySpeedTest)
+            {
+                Console.WriteLine(item.CaseInsensitiveFilename);
+            }
+
+            //3.2-3.8 seconds
+
+            Console.WriteLine("done");
+        }
+
+        if (false) //Going directly to items by their IDs is very slow
+        {
+            IQueryable DataItemPatternLists = from DataItemPatternList in db.DataItemPatternLists
+                                              where DataItemPatternList.PatternList.pattern == "a"
+                                              select DataItemPatternList.DataItemId;
+
+            List<long> patternListAIds = new List<long>();
+
+            foreach (long listID in DataItemPatternLists) patternListAIds.Add(listID);
+
+            Console.WriteLine("List is in memory");
+
+            foreach (long Id in patternListAIds)
+            {
+                DataItem check = db.DataItems.Find(Id);
+                if (check.CaseInsensitiveFilename.Contains(query)) Console.WriteLine(check.CaseInsensitiveFilename);
+            }
+
+            Console.WriteLine("done");
+
+        }
+
+        if (true)
+        {
+            IQueryable patternListsFirst = from DataItemPatternList in db.DataItemPatternLists
+                                           where query.Contains(DataItemPatternList.PatternList.pattern)
+                                           select DataItemPatternList;
+
+            foreach (DataItemPatternList list in patternListsFirst)
+            {
+                if (list.DataItem != null)
+                {
+                    if (list.DataItem.CaseInsensitiveFilename.Contains(query)) Console.WriteLine(list.DataItem.CaseInsensitiveFilename);
+                }
+            }
+             //4.8-5.8 seconds, slow
+            Console.WriteLine("done");
+        }
+
     }
 }
 
@@ -64,7 +147,7 @@ void ReceiveData(DataItem thing)
         if (!results.Contains(thing))
         {
             results.Add(thing);
-            Console.WriteLine("Data received:" + thing.CaseInsensitiveFilename);
+            Task.Run(() => { Console.WriteLine("Data received:" + thing.FullPath); });
         }
     }
 }
@@ -94,19 +177,25 @@ async void doStuff()
         {
             Task<ResultCode> jawn = DBHandler.AddFolder(db, new DirectoryInfo(localDirs), true);
             await jawn;
+
+            Console.WriteLine("Here's a jawn: " + jawn.ToString());
         }
     }
 
     Console.WriteLine("folder add is DONEZO");
 
-    //Use the new housekeeping class!
-    using (DBClass db = new DBClass()) {
-        Housekeeping dostuff = new Housekeeping(db);
+    if (false)
+    {
+        //Use the new housekeeping class!
+        using (DBClass db = new DBClass())
+        {
+            Housekeeping dostuff = new Housekeeping(db);
 
-        await dostuff.StartHousekeeping(ReceiveDataResultCode);
+            await dostuff.StartHousekeeping(ReceiveDataResultCode);
 
-        Console.WriteLine("WE DONE maybe");
-        while (true) ;
+            Console.WriteLine("WE DONE maybe");
+            while (true) ;
+        }
     }
 
     if (false) //View DB

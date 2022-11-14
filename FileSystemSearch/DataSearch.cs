@@ -125,15 +125,15 @@ namespace FileSystemSearch
         }
         */
 
-        //Search 'setToSearch' for 'query'. receiveData will be called with any results found
-        public static async Task<Task> DataItemListSearchAsync(DBClass db, string query, ResultReturn receiveData, List<DataItem> setToSearch)
+        //Search the contents of 'setToSearch' for 'query'. receiveData will be called with any results found
+        public static async Task<Task> SearchDataItemList(DBClass db, string query, ResultReturn receiveData, List<DataItem> setToSearch)
         {
             //This should return a task so the caller can keep track of how many concurrent search tasks are running
             return Task.Run(() =>
             {
                 foreach (DataItem item in setToSearch)
                 {
-                    if (item.CaseInsensitiveFilename.Contains(query))
+                    if (item != null && item.CaseInsensitiveFilename.Contains(query))
                     {
                         receiveData(item);
                     }
@@ -141,8 +141,9 @@ namespace FileSystemSearch
             });
         }
 
+
         //Search by scaling pattern lists first
-        //Currently in flux, do not use
+        /*
         public static async Task SmartSearch(DBClass db, string query, ResultReturn receiveData, int taskLimit)
         {
             const bool debug = true;
@@ -154,56 +155,57 @@ namespace FileSystemSearch
                 _DebugOut(debugName + "Start");
             }
 
-            
-            List<Task> tasks = new List<Task>();
+            IQueryable relevantLists = from DataItemPatternList in db.DataItemPatternLists
+                                       where query.Contains(DataItemPatternList.PatternList.pattern)
+                                       select DataItemPatternList;
 
-            /*
-            foreach (DataItem item in items)
+            List<DataItemPatternList> lists = new List<DataItemPatternList>();
+
+            lock (db)
             {
-                while (_GetRemainingTasks(tasks) >= taskLimit) ; //Block if the task limit is reached
-                lock (tasks)
-                {
-                    tasks.Add(DataItemListSearchAsync(db, query, receiveData, items));
-                }
-
+                foreach (DataItemPatternList list in relevantLists) lists.Add(list);
             }
-            */
+
+            List <Task> tasks = new List<Task>();
+
+            
+            
         }
+        */
+
 
         //Testing the speed of well-structured queries
-        public static async Task<Task> GoodQueryingTest(DBClass db, string query, ResultReturn receiveData)
+        public static async Task<Task> DirectQuerySearch(DBClass db, string query, ResultReturn receiveData)
         {
             const bool debug = true;
-            const string debugName = "DataSearch.GoodQueryingTest:";
+            const string debugName = "DataSearch.DirectQuerySearch:";
 
             if (debug) _DebugOut(debugName + "Called");
 
             /*
             IQueryable queryResults = from DataItemPatternList in db.DataItemPatternLists
-                                      where query.Contains(DataItemPatternList.PatternList.pattern)
+                                      where DataItemPatternList.DataItem.CaseInsensitiveFilename.Contains(query.ToLower())
                                       select DataItemPatternList.DataItem;
             */
 
-            IQueryable queryResults = from DataItemPatternList in db.DataItemPatternLists
-                                      where DataItemPatternList.DataItem.CaseInsensitiveFilename.Contains(query.ToLower())
-                                      select DataItemPatternList.DataItem;
+            IQueryable queryResults = from DataItem in db.DataItems
+                                      where DataItem.CaseInsensitiveFilename.Contains(query.ToLower())
+                                      select DataItem;
 
 
-            await Task.Run(() =>
+            return Task.Run(() =>
             {
-                Console.WriteLine("squagiel!");
                 foreach (DataItem item in queryResults)
                 {
                     receiveData(item);
                 }
-                Console.WriteLine("brangie.");
-            });
 
-            return new Task(() => { Console.WriteLine("tasky"); } );
+                Console.WriteLine("doneeeee");
+            });
 
         }
 
-        //Possibly temporary pattern, returns all DataItems associated with a pattern list
+        //Returns all DataItems associated with a pattern list
         public static List<DataItem> GetPatternListContents(DBClass db, PatternList list)
         {
             IQueryable listContents = from DataItemPatternList in db.DataItemPatternLists
@@ -218,24 +220,6 @@ namespace FileSystemSearch
             }
 
             return results;
-        }
-
-        public static async Task<Task> SearchListOfDataItems(DBClass db, string query, List<DataItem> itemsToSearch, ResultReturn receiveData)
-        {
-            return new Task(() =>
-            {
-                foreach (DataItem item in itemsToSearch)
-                {
-                    try
-                    {
-                        if (item.CaseInsensitiveFilename.Contains(query)) receiveData(item);
-                    }
-                    catch (NullReferenceException e)
-                    {
-                        _NullReferenceExceptionHandler();
-                    }
-                }
-            });
         }
 
 

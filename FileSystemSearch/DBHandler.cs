@@ -39,7 +39,7 @@ namespace FileSystemSearch
     class DBQueue
     {
         List<Task> dbTasks;
-        List<DataItem> dataItemQueue, dataItemNext, testlist;
+        List<DataItem> dataItemQueue, dataItemNext;
         DBClass db;
         bool finished;
 
@@ -48,7 +48,7 @@ namespace FileSystemSearch
         const bool debug = true, debugLocks = false;
 
         //The caller can read this to determine if operations are still pending before disposing the db instance
-        public bool operationsPending; 
+        public bool operationsPending;
 
         public DBQueue(DBClass dbReference)
         {
@@ -63,12 +63,11 @@ namespace FileSystemSearch
             itemsAdded = 0;
 
             debugCounter = 0;
-
-            testlist = new List<DataItem>();
         }
 
         public async void RunQueue()
         {
+            const string debugName = "DBQueue.RunQueue():";
             await Task.Run(() => {
                 operationsPending = true;
 
@@ -77,14 +76,18 @@ namespace FileSystemSearch
                 while (true)
                 {
                     //Run continuously until the caller says it's done sending data.
-                    if (finished == true && dataItemQueue.Count == 0 && dataItemNext.Count == 0) break;
+                    if (finished == true && dataItemQueue.Count == 0 && dataItemNext.Count == 0)
+                    {
+                        if (debug) Console.WriteLine(debugName + "Break conditions met, exiting RunQueue loop.");
+                        break;
+                    }
                     if (dataItemQueue.Count == 0 && dataItemNext.Count == 0)
                     {
                         //if (superdebug) _DebugOutAsync("dataItemQueue and dataItemNext are both empty. Continuing.");
                         continue;
                     }
 
-                    if (superdebug) _DebugOutAsync("Continue");
+                    if (superdebug) _DebugOutAsync("RunQueue Continue");
 
                     //This arrangement is intended to prevent a situation where locking dataItemQueue could defeat the purpose
                     //of this class by making it perform effectively synchronously.
@@ -117,7 +120,6 @@ namespace FileSystemSearch
                                 foreach (DataItem item in dataItemQueue)
                                 {
                                     db.Add(item);
-                                    //testlist.Add(item);
                                     itemsAdded++;
                                 }
                             }
@@ -125,10 +127,9 @@ namespace FileSystemSearch
                         }
                         if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue unlock");
                     }
-
-
                 }
-                testlist.Clear();
+
+
                 if (debug) Console.WriteLine("DBQueue complete!!! Items added: " + itemsAdded);
                 lock (db)
                 {
@@ -156,13 +157,13 @@ namespace FileSystemSearch
 
         public void SetComplete()
         {
-            _DebugOutAsync("SetComplete hit!");
+            _DebugOutAsync("SetComplete hit! dataItemNext count: " + dataItemNext.Count + " dataItemQueue count: " + dataItemQueue.Count);
             finished = true;
         }
 
         private async void _DebugReadout()
         {
-            while (!finished)
+            while (!finished || operationsPending)
             {
                 await Task.Delay((1000));
                 Console.WriteLine("Queue! Total items: " + itemsAdded);
@@ -206,7 +207,7 @@ namespace FileSystemSearch
 
         public async Task StartHousekeeping(ResultReturn resultOut)
         {
-            const bool debug = true;
+            const bool debug = false;
             const string debugName = "Housekeeping.StartHousekeeping():";
 
             if (debug) _debugOut(debugName + "Start");
@@ -235,14 +236,23 @@ namespace FileSystemSearch
                         }
                     }
 
-                    if (debug) _debugOut(debugName + "Unprocessed files listulated, beginning processing process.");
+                    if (debug) _debugOut(debugName + "Unprocessed files: " + itemsToProcess.Count);
 
 
                     for (int i = 0; i < itemsToProcess.Count; i++)
                     {
-                        //while (GetPendingTasks() > taskLimit) ; //Block if the task limit is hit
+                        while (GetPendingTasks() > taskLimit) ; //Block if the task limit is hit
                         _processFile(itemsToProcess[i], resultOut);
                     }
+
+                    while (GetPendingTasks() > 0) ; //Block if any tasks are incomplete
+
+                    lock (db)
+                    {
+                        db.SaveChanges();
+                    }
+
+                    cancelHousekeeping = true;
                 }
                 isHousekeeping = false;
                 if (debug) _debugOut(debugName + "Housekeeping has ended.");
@@ -260,11 +270,12 @@ namespace FileSystemSearch
         //this function; if a duplicate is found, this function will remove it on its own.
         private async void _processFile(DataItem item, ResultReturn resultOut)
         {
-            const bool debug = true;
+            const bool debug = false;
             const string debugName = "Housekeeping._processFile():";
             runningTasks.Add(Task.Run(() => {
                 if (debug) _debugOut(debugName + "Processing " + item.FullPath);
 
+                
                 if (_isDuplicate(item))
                 {
                     if (debug) _debugOut(debugName + "Duplicate found: " + item.FullPath);
@@ -275,6 +286,7 @@ namespace FileSystemSearch
                     }
                     return;
                 }
+                
 
                 if (debug) _debugOut(debugName + "Checking for new pattern lists.");
 
@@ -448,27 +460,24 @@ namespace FileSystemSearch
         }
 
 
-        //Pass a path to a single file to add it to the database
+        //Pass a path to a single file to add it to the database. Currently does nothing.
         public static void AddItem(DBClass db, string path)
         {
 
         }
 
 
-
-        //Pass a DataItem and it will add it to the database. Duplicate check will be performed
+        //Pass a DataItem and it will add it to the database.
         public static async Task<ResultCode> AddItem(DBClass db, DataItem item)
         {
-            //Dupe check overhaul coming later, see planning doc
-            //if (await _IsDuplicate(db, item) == false)
+            try
             {
                 db.Add(item);
                 return ResultCode.SUCCESS;
             }
-            //else
+            catch
             {
-                //_DebugOut("Duplicate found: " + item.CaseInsensitiveFilename);
-            //    return ResultCode.DUPLICATE_FOUND;
+                return ResultCode.FAIL;
             }
         }
 
@@ -566,6 +575,21 @@ namespace FileSystemSearch
         }
 
 
+        //Verify that an item exists
+        public static ResultCode VerifyItem(DBClass db, DataItem item)
+        {
+            if (item == null)
+            {
+                return ResultCode.NULLCODE;
+            }
+
+            FileInfo file = new FileInfo(item.FullPath);
+
+            if (file.Exists) return ResultCode.SUCCESS;
+            return ResultCode.FAIL;
+        }
+
+
         //Create a new pattern list. Performs duplicate check.
         public static ResultCode CreatePatternList(DBClass db, string newPattern)
         {
@@ -606,6 +630,7 @@ namespace FileSystemSearch
                 for (int character = 0; character < item.CaseInsensitiveFilename.Count(); character++)
                 {
                     ResultCode result = CreatePatternList(db, item.CaseInsensitiveFilename[character].ToString());
+
                     //if (result == ResultCode.DUPLICATE_FOUND) _DebugOut("Dupey!!!!");
                 }
             }
@@ -651,19 +676,21 @@ namespace FileSystemSearch
         }
 
 
-        //Combine two pattern lists into one. Args 2 and 3 are keys to both lists
+        //Combine two pattern lists into one. Args 2 and 3 are keys to both lists. Functionality pending on future updates
         public static void CombinePatternLists(DBClass db, long listPKey1, long listPKey2)
         {
 
         }
 
 
-        //Find and combine lists whose members are >similarity% in common
+        //Find and combine lists whose members are >similarity% in common. Functionality pending
         public static void SimplifyLists(DBClass db, int similarity)
         {
 
         }
         
+
+        //Boilerplate test function
         public static void test(DBClass db)
         {
             _PrintAllFiles(db);
@@ -674,35 +701,39 @@ namespace FileSystemSearch
         //Call this to perform a recursive folder add
         private static async Task<ResultCode> _AddFolderRecursiveContainer(DBClass db, System.IO.DirectoryInfo rootFolder)
         {
-            const bool debug = false;
+            const bool debug = true;
             const string debugName = "_AddFolderRecursiveContainer:";
 
             DBQueue queue = new DBQueue(db);
 
             List<System.IO.DirectoryInfo> folders = new List<System.IO.DirectoryInfo>();
 
-            await _AddFolderRecursive(db, rootFolder, folders, queue);
+            //Note: RunQueue must start before the first folder add; concurrency issues can otherwise cause this function
+            //to return before the queue has begun processing
+            queue.RunQueue();
 
-            if (folders.Count > 0) queue.RunQueue();
+            await _AddFolderRecursive(db, rootFolder, folders, queue);
 
             while (folders.Count > 0)
             {
                 if (debug)
                 {
-                    _DebugOut(debugName + "Calling _AddFolderRecursive with :" + folders.Last<DirectoryInfo>().FullName);
+                    _DebugOutAsync(debugName + "Calling _AddFolderRecursive with :" + folders.Last<DirectoryInfo>().FullName);
                 }
                 await _AddFolderRecursive(db, folders.Last<DirectoryInfo>(), folders, queue);
             }
+
+
+
+            queue.SetComplete();
+
+            while (queue.operationsPending) ; //Block until pending operations are completed
 
 
             if (debug)
             {
                 _DebugOutAsync(debugName + "Complete!");
             }
-
-            queue.SetComplete();
-
-            while (queue.operationsPending) ; //Block until pending operations are completed
 
             return ResultCode.SUCCESS;
         }
@@ -733,94 +764,98 @@ namespace FileSystemSearch
             }
             if (debugLocks) _DebugOutAsync(debugName + "Unlocked: nextFolder");
 
-            //using (db)
+            
+            try
             {
-                try
-                {
-                    files = folder.GetFiles("*");
-                }
-                catch (UnauthorizedAccessException e)
-                {
-                    _UnauthorizedFileHandler(e);
-                }
-                catch (Exception e)
-                {
-                    _MiscExceptionHandler(e);
-                }
-
-                try
-                {
-                    folders = folder.GetDirectories();
-                }
-                catch (UnauthorizedAccessException e)
-                {
-                    _UnauthorizedFileHandler(e);
-                }
-                catch (Exception e)
-                {
-                    _MiscExceptionHandler(e);
-                }
-
-                if (files == null && folders == null) return ResultCode.SUCCESS;
-
-                if (files != null)
-                {
-
-                    foreach (System.IO.FileInfo file in files)
-                    {
-                        DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
-
-                        //if (await _IsDuplicate(db, item) == false)
-                        {
-                            //db.Add(item);
-                            queue.AddToQueue(item);
-                        }
-                        /*
-                        else
-                        {
-                            _DebugOutAsync("Duplicate found: " + item.CaseInsensitiveFilename);
-                        }
-                        */
-                    }
-
-                }
-                else
-                {
-                    if (debug) _DebugOutAsync("No files found in " + folder.FullName + " or files is null for some other reason.");
-                }
-
-                if (folders != null)
-                {
-                    foreach (System.IO.DirectoryInfo foundfolder in folders)
-                    {
-                        DataItem item =
-                            new DataItem { FullPath = foundfolder.FullName, CaseInsensitiveFilename = foundfolder.Name.ToLower() };
-
-                        lock (folders)
-                        {
-                            if (debugLocks) _DebugOutAsync(debugName + "Locked: folders");
-                            nextFolder.Add(foundfolder);
-                        }
-                        if (debugLocks) _DebugOutAsync(debugName + "Unlocked: folders");
-
-                        if (debug)
-                        {
-                            _DebugOut(debugName + "Folder found! " + item.FullPath);
-                        }
-                    }
-                }
-
-                //This has been moved to DBQueue.RunQueue()
-                /*
-                await Task.Run(() => { 
-                    lock (db)
-                    {
-                        db.SaveChanges();
-                    }
-                });
-                */
-                return ResultCode.SUCCESS;
+                files = folder.GetFiles("*");
             }
+            catch (UnauthorizedAccessException e)
+            {
+                _UnauthorizedFileHandler(e);
+            }
+            catch (Exception e)
+            {
+                _MiscExceptionHandler(e);
+            }
+
+            try
+            {
+                folders = folder.GetDirectories();
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                _UnauthorizedFileHandler(e);
+            }
+            catch (Exception e)
+            {
+                _MiscExceptionHandler(e);
+            }
+
+            DataItem thisFolder = new DataItem();
+            thisFolder.FullPath = folder.FullName;
+            thisFolder.CaseInsensitiveFilename = folder.Name.ToLower();
+            queue.AddToQueue(thisFolder);
+
+
+            if (files == null && folders == null) return ResultCode.SUCCESS;
+
+            if (files != null)
+            {
+
+                foreach (System.IO.FileInfo file in files)
+                {
+                    DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
+                    //if (await _IsDuplicate(db, item) == false)
+                    {
+                        //db.Add(item);
+                        queue.AddToQueue(item);
+                    }
+                    /*
+                    else
+                    {
+                        _DebugOutAsync("Duplicate found: " + item.CaseInsensitiveFilename);
+                    }
+                    */
+                }
+
+            }
+            else
+            {
+                if (debug) _DebugOutAsync("No files found in " + folder.FullName + " or files is null for some other reason.");
+            }
+
+            if (folders != null)
+            {
+                foreach (System.IO.DirectoryInfo foundfolder in folders)
+                {
+                    DataItem item =
+                        new DataItem { FullPath = foundfolder.FullName, CaseInsensitiveFilename = foundfolder.Name.ToLower() };
+
+                    lock (folders)
+                    {
+                        if (debugLocks) _DebugOutAsync(debugName + "Locked: folders");
+                        nextFolder.Add(foundfolder);
+                    }
+                    if (debugLocks) _DebugOutAsync(debugName + "Unlocked: folders");
+
+                    if (debug)
+                    {
+                        _DebugOut(debugName + "Folder found! " + item.FullPath);
+                    }
+                }
+            }
+
+            //This has been moved to DBQueue.RunQueue()
+            /*
+            await Task.Run(() => { 
+                lock (db)
+                {
+                    db.SaveChanges();
+                }
+            });
+            */
+            return ResultCode.SUCCESS;
+            
         }
 
 

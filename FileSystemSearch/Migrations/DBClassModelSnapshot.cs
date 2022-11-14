@@ -31,6 +31,9 @@ namespace FileSystemSearch.Migrations
                     b.Property<bool>("HasBeenDuplicateChecked")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("HasDiscrepancies")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.ToTable("DataItems");

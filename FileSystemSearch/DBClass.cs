@@ -39,9 +39,13 @@ namespace FileSystemSearch
         //Set this flag to true once an entry has been duplicate-checked and sorted to pattern lists
         public bool HasBeenDuplicateChecked { get; set; }
 
+        //Set if discrepancies are found (ie file does not exist)
+        public bool HasDiscrepancies { get; set; }
+
         public DataItem()
         {
             HasBeenDuplicateChecked = false;
+            HasDiscrepancies = false;
         }
 
     }
