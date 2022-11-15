@@ -1,5 +1,6 @@
-﻿// See https://aka.ms/new-console-template for more information
-
+﻿
+//Copyright 2022 Chris / abstractedfox
+//chriswhoprograms@gmail.com
 
 using System;
 using System.Linq;
@@ -12,9 +13,29 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 
 
 //This file is temporary and will probably be super boilerplatey
+//Update to the above line: it is! Right now it's being used to initialize CLI.cs, which is not boilerplatey.
+//Boilerplate code will be left behind for a little bit in case it becomes useful again
+
+
+
+initCLI();
+
+void initCLI()
+{
+    CLI cmdInstance = new CLI();
+
+    cmdInstance.CLILoopEntry();
+}
+
+
+
+
+
+
+
+
 
 Console.WriteLine("Hello, World!");
-
 
 string currentDir = System.IO.Directory.GetCurrentDirectory();
 string localDirsFile = System.IO.Path.Join(currentDir, "localpaths.txt");
@@ -24,19 +45,8 @@ var folder = Environment.SpecialFolder.LocalApplicationData;
 var path = Environment.GetFolderPath(folder);
 string DbPath = System.IO.Path.Join(path, "database.db");
 
-List<DataItem> results = new List<DataItem>();
-
-testSearch();
-
-//doStuff();
-Console.WriteLine("doStuff is over");
 
 
-while (true)
-{
-    //Console.WriteLine("asdf");
-    await Task.Delay(6000);
-}
 
 async void testSearch()
 {
@@ -51,6 +61,7 @@ async void testSearch()
         Console.WriteLine("done");
     }
 }
+
 
 //Is it more efficient to keep data from the database in memory? (yes, but it uses a lot more memory)
 void testDBInstancing()
@@ -138,6 +149,7 @@ void testDBInstancing()
 
 
 
+List<DataItem> results = new List<DataItem>();
 
 
 void ReceiveData(DataItem thing)
@@ -335,17 +347,6 @@ async void doStuff()
 
 }
 
-
-
-
-
-
-
-//testDB();
-
-//ReadDB();
-
-//testLists();
 
 //boilerplate DB stuff below
 

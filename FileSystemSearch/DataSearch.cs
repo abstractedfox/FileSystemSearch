@@ -1,4 +1,8 @@
-﻿using System;
+﻿
+//Copyright 2022 Chris / abstractedfox
+//chriswhoprograms@gmail.com
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -14,50 +18,6 @@ namespace FileSystemSearch
     internal class DataSearch
     {
         public delegate void ResultReturn(DataItem result);
-
-
-        //Performs a raw sequential search of the database based on the query. Slow.
-        public static async Task QuerySearch(DBClass db, string query, ResultReturn receiveData)
-        {
-            const bool verbose = false;
-            const string debugName = "DataSearch.QuerySearch():";
-
-            if (verbose)
-            {
-                _DebugOut(debugName + "Searching for: " + query);
-            }
-
-
-            IQueryable querytime = from DataItem in db.DataItems
-                                   select DataItem;
-
-
-            await Task.Run(() =>
-            {
-
-                foreach (DataItem item in querytime)
-                {
-                    try
-                    {
-                        if (item.CaseInsensitiveFilename.Contains(query))
-                        {
-                            receiveData(item);
-                        }
-                    }
-                    catch (NullReferenceException e)
-                    {
-                        _NullReferenceExceptionHandler();
-                    }
-                }
-            });
-            
-
-            if (verbose)
-            {
-                _DebugOut(debugName + "Done");
-            }
-        }
-
 
         //Search a single pattern list for a query.
         //This may no longer be necessary (deletion candidate)
@@ -143,6 +103,7 @@ namespace FileSystemSearch
 
 
         //Search by scaling pattern lists first
+        //Revisit this after we decide how we want to implement 'baking' the index
         /*
         public static async Task SmartSearch(DBClass db, string query, ResultReturn receiveData, int taskLimit)
         {
@@ -182,12 +143,6 @@ namespace FileSystemSearch
 
             if (debug) _DebugOut(debugName + "Called");
 
-            /*
-            IQueryable queryResults = from DataItemPatternList in db.DataItemPatternLists
-                                      where DataItemPatternList.DataItem.CaseInsensitiveFilename.Contains(query.ToLower())
-                                      select DataItemPatternList.DataItem;
-            */
-
             IQueryable queryResults = from DataItem in db.DataItems
                                       where DataItem.CaseInsensitiveFilename.Contains(query.ToLower())
                                       select DataItem;
@@ -200,7 +155,7 @@ namespace FileSystemSearch
                     receiveData(item);
                 }
 
-                Console.WriteLine("doneeeee");
+                if (debug) _DebugOut(debugName + "Complete");
             });
 
         }
@@ -243,23 +198,6 @@ namespace FileSystemSearch
 
         //*********************Private methods
 
-        //Perform a search by looking for relvant pattern lists
-        private static async Task<Task> _GetPatternListContents(DBClass db, string query, ResultReturn receiveData)
-        {
-            IQueryable queryResults = from DataItemPatternList in db.DataItemPatternLists
-                                      where query.Contains(DataItemPatternList.PatternList.pattern)
-                                      select DataItemPatternList.DataItem;
-
-            //List<DataItem> results = new List<DataItem>();
-
-            return new Task(() => {
-                foreach (DataItem item in queryResults)
-                {
-                    receiveData(item);
-                }
-            });
-
-        }
 
         private static void _DebugOut(string debugText)
         {

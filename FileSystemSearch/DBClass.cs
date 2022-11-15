@@ -1,4 +1,8 @@
-﻿using System;
+﻿
+//Copyright 2022 Chris / abstractedfox
+//chriswhoprograms@gmail.com
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -21,7 +25,7 @@ namespace FileSystemSearch
         {
             var folder = Environment.SpecialFolder.LocalApplicationData;
             var path = Environment.GetFolderPath(folder);
-            DbPath = System.IO.Path.Join(path, "database.db");
+            DbPath = System.IO.Path.Join(path, "FileSystemSearchDatabase.db");
         }
 
         protected override void OnConfiguring(DbContextOptionsBuilder options) =>
