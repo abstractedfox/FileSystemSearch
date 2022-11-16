@@ -77,7 +77,23 @@ namespace FileSystemSearch
                     {
                         continue;
                     }
-                    BuildIndex(input);
+                    BuildIndex(input, false);
+
+                    continue;
+                }
+
+                if (input == "/rebuildindex")
+                {
+                    string indexstart = "";
+
+                    _userOutput("This will purge the entire index. Enter a root folder to rebuild the index. Enter \"/cancel\" to cancel.");
+
+                    input = Console.ReadLine();
+                    if (input == "/cancel")
+                    {
+                        continue;
+                    }
+                    BuildIndex(input, true);
 
                     continue;
                 }
@@ -145,8 +161,8 @@ namespace FileSystemSearch
         }
 
 
-        //Build or rebuild the index from the passed path.
-        public async void BuildIndex(string path)
+        //Build or rebuild the index from the passed path. If "rebuildFromScratch" == true, it empties the database first.
+        public async void BuildIndex(string path, bool rebuildFromScratch)
         {
             if (path == null)
             {
@@ -162,15 +178,16 @@ namespace FileSystemSearch
 
             _userOutput("Initializing index.");
 
-            DBHandler.Clear(db);
+            if (rebuildFromScratch)
+            {
+                DBHandler.Clear(db);
 
-            await DBHandler.AddFolder(db, rootFolder, true);
-
-            /*
-            Housekeeping dupeCheck = new Housekeeping(db);
-
-            await dupeCheck.StartHousekeeping(_ReceiveDataResultCode);
-            */
+                await DBHandler.AddFolder(db, rootFolder, true, true);
+            }
+            else
+            {
+                await DBHandler.AddFolder(db, rootFolder, true, false);
+            }
 
             _userOutput("Index complete.");
         }

@@ -187,7 +187,7 @@ async void doStuff()
     {
         using (DBClass db = new DBClass())
         {
-            Task<ResultCode> jawn = DBHandler.AddFolder(db, new DirectoryInfo(localDirs), true);
+            Task<ResultCode> jawn = DBHandler.AddFolder(db, new DirectoryInfo(localDirs), true, true);
             await jawn;
 
             Console.WriteLine("Here's a jawn: " + jawn.ToString());

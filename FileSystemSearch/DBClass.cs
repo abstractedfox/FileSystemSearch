@@ -46,9 +46,12 @@ namespace FileSystemSearch
         //Set if discrepancies are found (ie file does not exist)
         public bool HasDiscrepancies { get; set; }
 
+        public bool MarkForDeletion { get; set; }
+
         public DataItem()
         {
             HasBeenDuplicateChecked = false;
+            MarkForDeletion = false;
             HasDiscrepancies = false;
         }
 
