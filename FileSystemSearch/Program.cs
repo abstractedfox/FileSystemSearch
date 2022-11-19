@@ -17,7 +17,6 @@ using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 //Boilerplate code will be left behind for a little bit in case it becomes useful again
 
 
-
 initCLI();
 
 void initCLI()

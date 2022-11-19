@@ -157,7 +157,47 @@ namespace FileSystemSearch
 
                 if (debug) _DebugOut(debugName + "Complete");
             });
+        }
 
+        public static ResultCode ParsedQuerySearch(DBClass db, string input, ResultReturn receiveData)
+        {
+            //Input should be formatted as queries contained in pairs of quotes
+            List<string> queries = new List<string>();
+
+            if (input == null || input == "") return ResultCode.FAIL;
+
+            int firstQuote = input.IndexOf("\"");
+            int lastQuote = input.IndexOf("\"", firstQuote + 1);
+            if (firstQuote == -1 || lastQuote == -1) return ResultCode.FAIL;
+
+            while (firstQuote != -1)
+            {
+                queries.Add(input.Substring(firstQuote + 1, lastQuote - 1 - firstQuote));
+                firstQuote = input.IndexOf("\"", lastQuote + 1);
+                lastQuote = input.IndexOf("\"", firstQuote + 1);
+            }
+
+            IQueryable queryResults = from DataItem in db.DataItems
+                                      where DataItem.CaseInsensitiveFilename.Contains(queries[0].ToLower())
+                                      select DataItem;
+
+            List<DataItem> firstResults = new List<DataItem>();
+            bool mismatch = false;
+            foreach (DataItem item in queryResults)
+            {
+                foreach (string query in queries)
+                {
+                    if (!item.CaseInsensitiveFilename.Contains(query.ToLower()))
+                    {
+                        mismatch = true;
+                        break;
+                    }
+                }
+                if (!mismatch) receiveData(item);
+                mismatch = false;
+            }
+
+            return ResultCode.SUCCESS;
         }
 
         //Returns all DataItems associated with a pattern list

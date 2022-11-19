@@ -283,6 +283,7 @@ namespace FileSystemSearch
 
 
         //Performs a dupe-check on the contents of dbCopy only. Marks any found duplicates for deletion.
+        //Slow, but technically faster than doing it via database queries.
         public int DupeCheckFast()
         {
             int dupesFound = 0;
@@ -634,15 +635,15 @@ namespace FileSystemSearch
             IQueryable dataItemPatternLists = from DataItemPatternList in db.DataItemPatternLists
                                               select DataItemPatternList;
 
-            RemoveItems(db, dataItems);
-            RemoveItems(db, patternLists);
-            RemoveItems(db, dataItemPatternLists);
+            if (db.DataItems.Count() > 0) RemoveItems(db, dataItems);
+            if (db.PatternLists.Count() > 0) RemoveItems(db, patternLists);
+            if (db.DataItemPatternLists.Count() > 0) RemoveItems(db, dataItemPatternLists);
             db.SaveChanges();
         }
 
 
         //Verify that an item exists
-        public static ResultCode VerifyItem(DBClass db, DataItem item)
+        public static ResultCode VerifyItem(DataItem item)
         {
             if (item == null)
             {

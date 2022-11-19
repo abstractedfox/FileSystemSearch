@@ -25,7 +25,8 @@ namespace FileSystemSearch
         const string userHelpText = "To perform a search, simply type any query. To select a result, enter the number of that result into the prompt.\n" +
             "Results will appear as they are discovered, and entry selections can be made at any time, even if the search is still in progress." +
             "Commands:\n" +
-            "\"/buildindex\" Build the index. This will prompt you for a root folder, and all subdirectories and their contents will be added." +
+            "\"/buildindex\" Add to the existing index from a chosen directory. Prompts for a root directory after calling." +
+            "\"/rebuildindex\" Rebuild the index starting at a chosen directory. Erases the existing index first." +
             "\"/help\" View this help text.\n" +
             "\"/exit\" Exit the search utility.";
 
@@ -98,6 +99,7 @@ namespace FileSystemSearch
                     continue;
                 }
 
+
                 Search(input);
 
                 SelectResultLoop();
@@ -109,7 +111,14 @@ namespace FileSystemSearch
         {
             results.Clear();
 
-            Task searchTask = DataSearch.DirectQuerySearch(db, query, _ReceiveData);
+            if (query.Contains("\""))
+            {
+                DataSearch.ParsedQuerySearch(db, query, _ReceiveData);
+            }
+            else
+            {
+                Task searchTask = DataSearch.DirectQuerySearch(db, query, _ReceiveData);
+            }
 
 
             return;
@@ -208,7 +217,7 @@ namespace FileSystemSearch
                 {
                     _errorHandler("Database does not exist.");
                 }
-
+                
                 dbInUse = true;
 
                 _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
@@ -221,8 +230,27 @@ namespace FileSystemSearch
         //Callback for receiving data from queries
         private void _ReceiveData(DataItem data)
         {
-            results.Add(data);
-            _userOutput("[" + (results.Count - 1) + "] " + data.FullPath);
+            //Compensate for duplicates in the index.
+            //if (!_AlreadyExists(results, data) && DBHandler.VerifyItem(data) == ResultCode.SUCCESS)
+            if (DBHandler.VerifyItem(data) == ResultCode.SUCCESS)
+            {
+                results.Add(data);
+                _userOutput("[" + (results.Count - 1) + "] " + data.FullPath);
+            }
+        }
+
+
+        //Checks a passed list of DataItems for an example matching itemToCheck, ignoring the key
+        private bool _AlreadyExists(List<DataItem> dataItems, DataItem itemToCheck)
+        {
+            foreach(DataItem item in dataItems)
+            {
+                if (item.FullPath.ToLower() == itemToCheck.FullPath.ToLower())
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         
