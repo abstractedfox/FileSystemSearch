@@ -40,6 +40,8 @@ namespace FileSystemSearch
         public string? CaseInsensitiveFilename { get; set; }
         public string? FullPath { get; set; }
 
+        public bool IsFolder { get; set; }
+
         //Set this flag to true once an entry has been duplicate-checked and sorted to pattern lists
         public bool HasBeenDuplicateChecked { get; set; }
 
@@ -50,6 +52,7 @@ namespace FileSystemSearch
 
         public DataItem()
         {
+            IsFolder = false;
             HasBeenDuplicateChecked = false;
             MarkForDeletion = false;
             HasDiscrepancies = false;

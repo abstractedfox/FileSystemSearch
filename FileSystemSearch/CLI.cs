@@ -45,6 +45,7 @@ namespace FileSystemSearch
         {
             while (!exit) 
             {
+                //note: make this a switch statement
                 _userOutput("Enter a query or command! Enter \"/help\" for help.");
 
                 string? input = Console.ReadLine();
@@ -166,7 +167,14 @@ namespace FileSystemSearch
                 return;
             }
 
-            System.Diagnostics.Process.Start("explorer.exe", String.Format("/select,\"{0}\"", results[resultNumber].FullPath));
+            if (!results[resultNumber].IsFolder)
+            {
+                System.Diagnostics.Process.Start("explorer.exe", String.Format("/select,\"{0}\"", results[resultNumber].FullPath));
+            }
+            else
+            {
+                System.Diagnostics.Process.Start("explorer.exe", String.Format("/n,\"{0}\"", results[resultNumber].FullPath));
+            }
         }
 
 
@@ -198,7 +206,11 @@ namespace FileSystemSearch
                 await DBHandler.AddFolder(db, rootFolder, true, false);
             }
 
+            for (int i = 0; i < 100; i++) GC.Collect();
+
             _userOutput("Index complete.");
+
+            dbInUse = false; //Close the DB instance or it will sit there using a ton of memory forever
         }
 
 
@@ -207,23 +219,33 @@ namespace FileSystemSearch
         //Initialize the database context
         private async void Initialize()
         {
-            using (db = new DBClass())
+            //Because this re-initializes the database if the instance closes, it must be non-blocking
+            await Task.Run(() =>
             {
-                if (db == null)
+                while (!exit) //If the database instance is closed but exit is false, initialize a new instance
                 {
-                    _errorHandler("Database returned null.");
-                }
-                if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
-                {
-                    _errorHandler("Database does not exist.");
-                }
-                
-                dbInUse = true;
+                    using (db = new DBClass())
+                    {
+                        if (db == null)
+                        {
+                            _errorHandler("Database returned null.");
+                        }
+                        if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
+                        {
+                            _errorHandler("Database does not exist.");
+                        }
 
-                _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
+                        dbInUse = true;
 
-                await Task.Run(() => { while (dbInUse) ; }); //Database context persists until the dbInUse flag is set to false
-            }
+                        _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
+
+                        while (dbInUse); //Database context persists until the dbInUse flag is set to false
+                        Console.WriteLine("Test! Do not read this."); 
+                    }
+                    db.Dispose();
+                    GC.Collect();
+                }
+            });
         }
 
 

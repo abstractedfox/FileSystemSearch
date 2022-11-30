@@ -150,9 +150,12 @@ namespace FileSystemSearch
 
             return Task.Run(() =>
             {
-                foreach (DataItem item in queryResults)
+                lock (db)
                 {
-                    receiveData(item);
+                    foreach (DataItem item in queryResults)
+                    {
+                        receiveData(item);
+                    }
                 }
 
                 if (debug) _DebugOut(debugName + "Complete");
@@ -177,20 +180,42 @@ namespace FileSystemSearch
                 lastQuote = input.IndexOf("\"", firstQuote + 1);
             }
 
-            IQueryable queryResults = from DataItem in db.DataItems
-                                      where DataItem.CaseInsensitiveFilename.Contains(queries[0].ToLower())
-                                      select DataItem;
+            //If the query starts with a ':', search the full path and not just the filename
+            IQueryable queryResults;
+            if (queries[0][0] != ':')
+            {
+                queryResults = from DataItem in db.DataItems
+                                          where DataItem.CaseInsensitiveFilename.Contains(queries[0].ToLower())
+                                          select DataItem;
+            }
+            else
+            {
+                queryResults = from DataItem in db.DataItems
+                               where DataItem.FullPath.ToLower().Contains(queries[0].Substring(1).ToLower())
+                               select DataItem;
+            }
 
-            List<DataItem> firstResults = new List<DataItem>();
             bool mismatch = false;
             foreach (DataItem item in queryResults)
             {
-                foreach (string query in queries)
+                for (int i = 0; i < queries.Count; i++)
                 {
-                    if (!item.CaseInsensitiveFilename.Contains(query.ToLower()))
+                    //If the query starts with a ':', search the full path and not just the filename
+                    if (!queries[i].Contains(":"))
                     {
-                        mismatch = true;
-                        break;
+                        if (!item.CaseInsensitiveFilename.Contains(queries[i].ToLower()))
+                        {
+                            mismatch = true;
+                            break;
+                        }
+                    }
+                    else if (queries[i][0] == ':')
+                    {
+                        if (!item.FullPath.ToLower().Contains(queries[i].Substring(1).ToLower()))
+                        {
+                            mismatch = true;
+                            break;
+                        }
                     }
                 }
                 if (!mismatch) receiveData(item);

@@ -650,9 +650,17 @@ namespace FileSystemSearch
                 return ResultCode.NULLCODE;
             }
 
-            FileInfo file = new FileInfo(item.FullPath);
+            if (!item.IsFolder)
+            {
+                FileInfo file = new FileInfo(item.FullPath);
 
-            if (file.Exists) return ResultCode.SUCCESS;
+                if (file.Exists) return ResultCode.SUCCESS;
+            }
+            else
+            {
+                DirectoryInfo dir = new DirectoryInfo(item.FullPath);
+                if (dir.Exists) return ResultCode.SUCCESS;
+            }
             return ResultCode.FAIL;
         }
 
@@ -880,7 +888,9 @@ namespace FileSystemSearch
             DataItem thisFolder = new DataItem();
             thisFolder.FullPath = folder.FullName;
             thisFolder.CaseInsensitiveFilename = folder.Name.ToLower();
-            if (setDuplicateFlag) thisFolder.HasBeenDuplicateChecked = true;
+            //if (setDuplicateFlag) thisFolder.HasBeenDuplicateChecked = true;
+            thisFolder.HasBeenDuplicateChecked = setDuplicateFlag;
+            thisFolder.IsFolder = true;
             queue.AddToQueue(thisFolder);
 
             if (files == null && folders == null) return ResultCode.SUCCESS;
@@ -906,7 +916,10 @@ namespace FileSystemSearch
                 foreach (System.IO.DirectoryInfo foundfolder in folders)
                 {
                     DataItem item =
-                        new DataItem { FullPath = foundfolder.FullName, CaseInsensitiveFilename = foundfolder.Name.ToLower() };
+                        new DataItem { FullPath = foundfolder.FullName, CaseInsensitiveFilename = foundfolder.Name.ToLower(),
+                        IsFolder = false };
+
+                    item.HasBeenDuplicateChecked = setDuplicateFlag;
 
                     lock (folders)
                     {
