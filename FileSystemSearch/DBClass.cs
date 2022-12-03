@@ -10,6 +10,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
 
 namespace FileSystemSearch
 {
@@ -58,7 +59,14 @@ namespace FileSystemSearch
             HasDiscrepancies = false;
         }
 
+        //asdf: this may not be permanent, we just need to see if adding finalizers will address that memory issue when indexing
+        ~DataItem()
+        {
+            CaseInsensitiveFilename = null;
+            FullPath = null;
+        }
     }
+
 
     public class PatternList
     {

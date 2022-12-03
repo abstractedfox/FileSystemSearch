@@ -198,7 +198,7 @@ namespace FileSystemSearch
             if (rebuildFromScratch)
             {
                 DBHandler.Clear(db);
-
+                
                 await DBHandler.AddFolder(db, rootFolder, true, true);
             }
             else
@@ -206,7 +206,7 @@ namespace FileSystemSearch
                 await DBHandler.AddFolder(db, rootFolder, true, false);
             }
 
-            for (int i = 0; i < 100; i++) GC.Collect();
+            GC.Collect();
 
             _userOutput("Index complete.");
 

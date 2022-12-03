@@ -41,12 +41,13 @@ namespace FileSystemSearch
     //A class for queueing database actions.
     //This is meant to enable some aspects of large file additions to work asynchronously while
     //keeping actual database writes synchronous
-    class DBQueue
+    class DBQueue : IDisposable
     {
         List<Task> dbTasks;
         List<DataItem> dataItemQueue, dataItemNext;
-        DBClass db;
+        DBClass? db;
         bool finished;
+        private bool _disposed;
 
         int itemsAdded;
 
@@ -64,8 +65,31 @@ namespace FileSystemSearch
             finished = false;
             operationsPending = false;
             if (debug) _DebugReadout();
+            _disposed = false;
 
             itemsAdded = 0;
+        }
+
+        ~DBQueue(){
+            if (_disposed) return;
+            dbTasks.Clear();
+            dataItemQueue.Clear();
+            dataItemNext.Clear();
+            db = null;
+
+            _disposed = true;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            dbTasks.Clear();
+            dataItemQueue.Clear();
+            dataItemNext.Clear();
+            db = null;
+
+            _disposed = true;
+            GC.SuppressFinalize(this);
         }
 
         public async void RunQueue()
@@ -466,44 +490,6 @@ namespace FileSystemSearch
             }
 
             return ResultCode.FAIL;
-                       
-            /*
-            try
-            {
-                files = folder.GetFiles("*");
-                if (files == null) return ResultCode.SUCCESS;
-            }
-            catch (UnauthorizedAccessException e)
-            {
-                _UnauthorizedFileHandler(e);
-            }
-            catch (Exception e)
-            {
-                _MiscExceptionHandler(e);
-            }
-
-            if (files != null)
-            {
-                foreach (System.IO.FileInfo file in files)
-                {
-                    DataItem item = new DataItem { FullPath = file.FullName, CaseInsensitiveFilename = file.Name.ToLower() };
-                    if (await AddItem(db, item) == ResultCode.DUPLICATE_FOUND)
-                    {
-                        _DebugOut("AddFolder: Duplicate file found: " + item.FullPath);
-                    }
-
-                }
-            }
-
-            lock (db)
-            {
-                db.SaveChanges();
-            }
-
-
-
-            return ResultCode.SUCCESS;
-            */
 
         }
 
@@ -613,7 +599,7 @@ namespace FileSystemSearch
             {
                 try
                 {
-                    db.Remove(item);
+                    var a = db.Remove(item);
                 }
                 catch (Exception e)
                 {
@@ -639,6 +625,7 @@ namespace FileSystemSearch
             if (db.PatternLists.Count() > 0) RemoveItems(db, patternLists);
             if (db.DataItemPatternLists.Count() > 0) RemoveItems(db, dataItemPatternLists);
             db.SaveChanges();
+            GC.Collect();
         }
 
 
@@ -800,34 +787,35 @@ namespace FileSystemSearch
             const bool debug = true;
             const string debugName = "_AddFolderRecursiveContainer:";
 
-            DBQueue queue = new DBQueue(db);
-
-            List<System.IO.DirectoryInfo> folders = new List<System.IO.DirectoryInfo>();
-
-            //Note: RunQueue must start before the first folder add; concurrency issues can otherwise cause this function
-            //to return before the queue has begun processing
-            queue.RunQueue();
-
-            await _AddFolderRecursive(db, rootFolder, folders, queue, setDuplicateFlag);
-
-            while (folders.Count > 0)
+            using (DBQueue queue = new DBQueue(db))
             {
+
+                List<System.IO.DirectoryInfo> folders = new List<System.IO.DirectoryInfo>();
+
+                //Note: RunQueue must start before the first folder add; concurrency issues can otherwise cause this function
+                //to return before the queue has begun processing
+                queue.RunQueue();
+
+                await _AddFolderRecursive(db, rootFolder, folders, queue, setDuplicateFlag);
+
+                while (folders.Count > 0)
+                {
+                    if (debug)
+                    {
+                        _DebugOutAsync(debugName + "Calling _AddFolderRecursive with :" + folders.Last<DirectoryInfo>().FullName);
+                    }
+                    await _AddFolderRecursive(db, folders.Last<DirectoryInfo>(), folders, queue, setDuplicateFlag);
+                }
+
+                queue.SetComplete();
+
+                while (queue.operationsPending) ; //Block until pending operations are completed
+
                 if (debug)
                 {
-                    _DebugOutAsync(debugName + "Calling _AddFolderRecursive with :" + folders.Last<DirectoryInfo>().FullName);
+                    _DebugOutAsync(debugName + "Complete!");
                 }
-                await _AddFolderRecursive(db, folders.Last<DirectoryInfo>(), folders, queue, setDuplicateFlag);
             }
-
-            queue.SetComplete();
-
-            while (queue.operationsPending) ; //Block until pending operations are completed
-
-            if (debug)
-            {
-                _DebugOutAsync(debugName + "Complete!");
-            }
-
             return ResultCode.SUCCESS;
         }
 
