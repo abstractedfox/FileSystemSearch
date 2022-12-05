@@ -150,14 +150,81 @@ namespace FileSystemSearch
 
             return Task.Run(() =>
             {
-                foreach (DataItem item in queryResults)
+                lock (db)
                 {
-                    receiveData(item);
+                    foreach (DataItem item in queryResults)
+                    {
+                        receiveData(item);
+                    }
                 }
 
                 if (debug) _DebugOut(debugName + "Complete");
             });
+        }
 
+        public static ResultCode ParsedQuerySearch(DBClass db, string input, ResultReturn receiveData)
+        {
+            //Input should be formatted as queries contained in pairs of quotes
+            List<string> queries = new List<string>();
+
+            if (input == null || input == "") return ResultCode.FAIL;
+
+            int firstQuote = input.IndexOf("\"");
+            int lastQuote = input.IndexOf("\"", firstQuote + 1);
+            if (firstQuote == -1 || lastQuote == -1) return ResultCode.FAIL;
+
+            while (firstQuote != -1)
+            {
+                queries.Add(input.Substring(firstQuote + 1, lastQuote - 1 - firstQuote));
+                firstQuote = input.IndexOf("\"", lastQuote + 1);
+                lastQuote = input.IndexOf("\"", firstQuote + 1);
+            }
+
+            using (DBClass searchInstance = new DBClass())
+            {
+                //If the query starts with a ':', search the full path and not just the filename
+                IQueryable queryResults;
+                if (queries[0][0] != ':')
+                {
+                    queryResults = from DataItem in searchInstance.DataItems
+                                   where DataItem.CaseInsensitiveFilename.Contains(queries[0].ToLower())
+                                   select DataItem;
+                }
+                else
+                {
+                    queryResults = from DataItem in searchInstance.DataItems
+                                   where DataItem.FullPath.ToLower().Contains(queries[0].Substring(1).ToLower())
+                                   select DataItem;
+                }
+
+                bool mismatch = false;
+                foreach (DataItem item in queryResults)
+                {
+                    for (int i = 0; i < queries.Count; i++)
+                    {
+                        //If the query starts with a ':', search the full path and not just the filename
+                        if (!queries[i].Contains(":"))
+                        {
+                            if (!item.CaseInsensitiveFilename.Contains(queries[i].ToLower()))
+                            {
+                                mismatch = true;
+                                break;
+                            }
+                        }
+                        else if (queries[i][0] == ':')
+                        {
+                            if (!item.FullPath.ToLower().Contains(queries[i].Substring(1).ToLower()))
+                            {
+                                mismatch = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!mismatch) receiveData(item);
+                    mismatch = false;
+                }
+            }
+            return ResultCode.SUCCESS;
         }
 
         //Returns all DataItems associated with a pattern list

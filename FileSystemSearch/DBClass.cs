@@ -10,6 +10,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
 
 namespace FileSystemSearch
 {
@@ -32,7 +33,7 @@ namespace FileSystemSearch
             options.UseSqlite($"Data Source={DbPath}");
     }
 
-    public class DataItem
+    public class DataItem : IDisposable
     {
         [Key]
         public long Id { get; set; }
@@ -40,19 +41,39 @@ namespace FileSystemSearch
         public string? CaseInsensitiveFilename { get; set; }
         public string? FullPath { get; set; }
 
+        public bool IsFolder { get; set; }
+
         //Set this flag to true once an entry has been duplicate-checked and sorted to pattern lists
         public bool HasBeenDuplicateChecked { get; set; }
 
         //Set if discrepancies are found (ie file does not exist)
         public bool HasDiscrepancies { get; set; }
 
+        public bool MarkForDeletion { get; set; }
+
         public DataItem()
         {
+            IsFolder = false;
             HasBeenDuplicateChecked = false;
+            MarkForDeletion = false;
             HasDiscrepancies = false;
         }
 
+        //asdf: this may not be permanent, we just need to see if adding finalizers will address that memory issue when indexing
+        ~DataItem()
+        {
+            CaseInsensitiveFilename = null;
+            FullPath = null;
+        }
+
+        public void Dispose()
+        {
+            CaseInsensitiveFilename = null;
+            FullPath = null;
+            GC.SuppressFinalize(this);
+        }
     }
+
 
     public class PatternList
     {

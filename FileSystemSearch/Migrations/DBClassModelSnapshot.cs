@@ -34,6 +34,12 @@ namespace FileSystemSearch.Migrations
                     b.Property<bool>("HasDiscrepancies")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsFolder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("MarkForDeletion")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.ToTable("DataItems");

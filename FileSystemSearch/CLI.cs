@@ -25,7 +25,8 @@ namespace FileSystemSearch
         const string userHelpText = "To perform a search, simply type any query. To select a result, enter the number of that result into the prompt.\n" +
             "Results will appear as they are discovered, and entry selections can be made at any time, even if the search is still in progress." +
             "Commands:\n" +
-            "\"/buildindex\" Build the index. This will prompt you for a root folder, and all subdirectories and their contents will be added." +
+            "\"/buildindex\" Add to the existing index from a chosen directory. Prompts for a root directory after calling." +
+            "\"/rebuildindex\" Rebuild the index starting at a chosen directory. Erases the existing index first." +
             "\"/help\" View this help text.\n" +
             "\"/exit\" Exit the search utility.";
 
@@ -42,8 +43,13 @@ namespace FileSystemSearch
         //Enter a loop which will continuously wait for user input.
         public async void CLILoopEntry()
         {
+            while (!dbInUse)
+            {
+                //If this starts before the database initialization is complete, wait.
+            }
             while (!exit) 
             {
+                //note: make this a switch statement
                 _userOutput("Enter a query or command! Enter \"/help\" for help.");
 
                 string? input = Console.ReadLine();
@@ -77,10 +83,27 @@ namespace FileSystemSearch
                     {
                         continue;
                     }
-                    BuildIndex(input);
+                    BuildIndex(input, false);
 
                     continue;
                 }
+
+                if (input == "/rebuildindex")
+                {
+                    string indexstart = "";
+
+                    _userOutput("This will purge the entire index. Enter a root folder to rebuild the index. Enter \"/cancel\" to cancel.");
+
+                    input = Console.ReadLine();
+                    if (input == "/cancel")
+                    {
+                        continue;
+                    }
+                    BuildIndex(input, true);
+
+                    continue;
+                }
+
 
                 Search(input);
 
@@ -92,9 +115,16 @@ namespace FileSystemSearch
         public async Task Search(string query)
         {
             results.Clear();
+            GC.Collect(); //Cleanup in case a significant number of results left a lot of memory in GC limbo
 
-            Task searchTask = DataSearch.DirectQuerySearch(db, query, _ReceiveData);
-
+            if (query.Contains("\""))
+            {
+                DataSearch.ParsedQuerySearch(db, query, _ReceiveData);
+            }
+            else
+            {
+                Task searchTask = DataSearch.DirectQuerySearch(db, query, _ReceiveData);
+            }
 
             return;
         }
@@ -107,7 +137,10 @@ namespace FileSystemSearch
             while (true) {
                 _userOutput("Result selections are now possible. For a new search, enter \"/newsearch\".");
                 input = Console.ReadLine();
-                if (input == "/newsearch") return;
+                if (input == "/newsearch")
+                {
+                    return;
+                }
                 if (input == "/exit")
                 {
                     exit = true;
@@ -129,6 +162,7 @@ namespace FileSystemSearch
                 {
                     _userOutput("Please enter a valid selection, or enter \"/newsearch\" to start a new search.");
                 }
+
             }
         }
 
@@ -141,12 +175,19 @@ namespace FileSystemSearch
                 return;
             }
 
-            System.Diagnostics.Process.Start("explorer.exe", String.Format("/select,\"{0}\"", results[resultNumber].FullPath));
+            if (!results[resultNumber].IsFolder)
+            {
+                System.Diagnostics.Process.Start("explorer.exe", String.Format("/select,\"{0}\"", results[resultNumber].FullPath));
+            }
+            else
+            {
+                System.Diagnostics.Process.Start("explorer.exe", String.Format("/n,\"{0}\"", results[resultNumber].FullPath));
+            }
         }
 
 
-        //Build or rebuild the index from the passed path.
-        public async void BuildIndex(string path)
+        //Build or rebuild the index from the passed path. If "rebuildFromScratch" == true, it empties the database first.
+        public async void BuildIndex(string path, bool rebuildFromScratch)
         {
             if (path == null)
             {
@@ -162,17 +203,23 @@ namespace FileSystemSearch
 
             _userOutput("Initializing index.");
 
-            DBHandler.Clear(db);
+            if (rebuildFromScratch)
+            {
+                DBHandler.Clear(ref db);
 
-            await DBHandler.AddFolder(db, rootFolder, true);
+                await DBHandler.AddFolder(db, rootFolder, true, true);
+            }
+            else
+            {
+                await DBHandler.AddFolder(db, rootFolder, true, false);
+            }
 
-            /*
-            Housekeeping dupeCheck = new Housekeeping(db);
-
-            await dupeCheck.StartHousekeeping(_ReceiveDataResultCode);
-            */
+            
+            GC.Collect();
 
             _userOutput("Index complete.");
+            
+            dbInUse = false; //Close the DB instance or it will sit there using a ton of memory forever
         }
 
 
@@ -181,31 +228,61 @@ namespace FileSystemSearch
         //Initialize the database context
         private async void Initialize()
         {
-            using (db = new DBClass())
+            //Because this re-initializes the database if the instance closes, it must be non-blocking
+            await Task.Run(() =>
             {
-                if (db == null)
+                while (!exit) //If the database instance is closed but exit is false, initialize a new instance
                 {
-                    _errorHandler("Database returned null.");
+                    using (db = new DBClass())
+                    {
+                        if (db == null)
+                        {
+                            _errorHandler("Database returned null.");
+                        }
+                        if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
+                        {
+                            _errorHandler("Database does not exist.");
+                        }
+
+
+                        _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
+
+                        dbInUse = true;
+
+                        while (dbInUse); //Database context persists until the dbInUse flag is set to false
+                    }
+                    db.Dispose();
+                    GC.Collect();
+
                 }
-                if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
-                {
-                    _errorHandler("Database does not exist.");
-                }
-
-                dbInUse = true;
-
-                _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
-
-                await Task.Run(() => { while (dbInUse) ; }); //Database context persists until the dbInUse flag is set to false
-            }
+            });
         }
 
 
         //Callback for receiving data from queries
         private void _ReceiveData(DataItem data)
         {
-            results.Add(data);
-            _userOutput("[" + (results.Count - 1) + "] " + data.FullPath);
+            //Compensate for duplicates in the index.
+            //if (!_AlreadyExists(results, data) && DBHandler.VerifyItem(data) == ResultCode.SUCCESS)
+            if (DBHandler.VerifyItem(data) == ResultCode.SUCCESS)
+            {
+                results.Add(data);
+                _userOutput("[" + (results.Count - 1) + "] " + data.FullPath);
+            }
+        }
+
+
+        //Checks a passed list of DataItems for an example matching itemToCheck, ignoring the key
+        private bool _AlreadyExists(List<DataItem> dataItems, DataItem itemToCheck)
+        {
+            foreach(DataItem item in dataItems)
+            {
+                if (item.FullPath.ToLower() == itemToCheck.FullPath.ToLower())
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         
