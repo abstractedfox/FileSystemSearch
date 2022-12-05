@@ -33,7 +33,7 @@ namespace FileSystemSearch
             options.UseSqlite($"Data Source={DbPath}");
     }
 
-    public class DataItem
+    public class DataItem : IDisposable
     {
         [Key]
         public long Id { get; set; }
@@ -64,6 +64,13 @@ namespace FileSystemSearch
         {
             CaseInsensitiveFilename = null;
             FullPath = null;
+        }
+
+        public void Dispose()
+        {
+            CaseInsensitiveFilename = null;
+            FullPath = null;
+            GC.SuppressFinalize(this);
         }
     }
 

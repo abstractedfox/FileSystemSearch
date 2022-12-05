@@ -143,10 +143,14 @@ namespace FileSystemSearch
                             if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue lock");
                             lock (db)
                             {
-                                foreach (DataItem item in dataItemQueue)
+                                using (DBClass addItemsInstance = new DBClass())
                                 {
-                                    db.Add(item);
-                                    itemsAdded++;
+                                    foreach (DataItem item in dataItemQueue)
+                                    {
+                                        addItemsInstance.Add(item);
+                                        itemsAdded++;
+                                    }
+                                    addItemsInstance.SaveChanges();
                                 }
                             }
                             dataItemQueue.Clear();
@@ -595,36 +599,45 @@ namespace FileSystemSearch
         //Remove items matching a query. Doesn't automatically save changes.
         public static void RemoveItems(DBClass db, IQueryable query)
         {
-            foreach (DataItem item in query)
+            using (DBClass removeItemsInstance = new DBClass())
             {
-                try
+                foreach (DataItem item in query)
                 {
-                    var a = db.Remove(item);
+                    try
+                    {
+                        removeItemsInstance.Remove(item);
+                    }
+                    catch (Exception e)
+                    {
+                        _MiscExceptionHandler(e);
+                    }
                 }
-                catch (Exception e)
-                {
-                    _MiscExceptionHandler(e);
-                }
+                removeItemsInstance.SaveChanges();
             }
+
+            GC.Collect();
         }
 
 
         //Clears the entire database
-        public static void Clear(DBClass db)
+        public static void Clear(ref DBClass db)
         {
-            IQueryable dataItems = from DataItem in db.DataItems
-                                   select DataItem;
+            using (DBClass removeItemsInstance = new DBClass())
+            {
+                IQueryable dataItems = from DataItem in removeItemsInstance.DataItems
+                                       select DataItem;
 
-            IQueryable patternLists = from PatternList in db.PatternLists
-                                      select PatternList;
+                IQueryable patternLists = from PatternList in removeItemsInstance.PatternLists
+                                          select PatternList;
 
-            IQueryable dataItemPatternLists = from DataItemPatternList in db.DataItemPatternLists
-                                              select DataItemPatternList;
+                IQueryable dataItemPatternLists = from DataItemPatternList in removeItemsInstance.DataItemPatternLists
+                                                  select DataItemPatternList;
 
-            if (db.DataItems.Count() > 0) RemoveItems(db, dataItems);
-            if (db.PatternLists.Count() > 0) RemoveItems(db, patternLists);
-            if (db.DataItemPatternLists.Count() > 0) RemoveItems(db, dataItemPatternLists);
-            db.SaveChanges();
+                if (removeItemsInstance.DataItems.Count() > 0) RemoveItems(removeItemsInstance, dataItems);
+                if (removeItemsInstance.PatternLists.Count() > 0) RemoveItems(removeItemsInstance, patternLists);
+                if (removeItemsInstance.DataItemPatternLists.Count() > 0) RemoveItems(removeItemsInstance, dataItemPatternLists);
+                removeItemsInstance.SaveChanges();
+            }
             GC.Collect();
         }
 

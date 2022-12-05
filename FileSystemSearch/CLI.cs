@@ -43,6 +43,10 @@ namespace FileSystemSearch
         //Enter a loop which will continuously wait for user input.
         public async void CLILoopEntry()
         {
+            while (!dbInUse)
+            {
+                //If this starts before the database initialization is complete, wait.
+            }
             while (!exit) 
             {
                 //note: make this a switch statement
@@ -111,6 +115,7 @@ namespace FileSystemSearch
         public async Task Search(string query)
         {
             results.Clear();
+            GC.Collect(); //Cleanup in case a significant number of results left a lot of memory in GC limbo
 
             if (query.Contains("\""))
             {
@@ -120,7 +125,6 @@ namespace FileSystemSearch
             {
                 Task searchTask = DataSearch.DirectQuerySearch(db, query, _ReceiveData);
             }
-
 
             return;
         }
@@ -133,7 +137,10 @@ namespace FileSystemSearch
             while (true) {
                 _userOutput("Result selections are now possible. For a new search, enter \"/newsearch\".");
                 input = Console.ReadLine();
-                if (input == "/newsearch") return;
+                if (input == "/newsearch")
+                {
+                    return;
+                }
                 if (input == "/exit")
                 {
                     exit = true;
@@ -155,6 +162,7 @@ namespace FileSystemSearch
                 {
                     _userOutput("Please enter a valid selection, or enter \"/newsearch\" to start a new search.");
                 }
+
             }
         }
 
@@ -197,8 +205,8 @@ namespace FileSystemSearch
 
             if (rebuildFromScratch)
             {
-                DBHandler.Clear(db);
-                
+                DBHandler.Clear(ref db);
+
                 await DBHandler.AddFolder(db, rootFolder, true, true);
             }
             else
@@ -206,10 +214,11 @@ namespace FileSystemSearch
                 await DBHandler.AddFolder(db, rootFolder, true, false);
             }
 
+            
             GC.Collect();
 
             _userOutput("Index complete.");
-
+            
             dbInUse = false; //Close the DB instance or it will sit there using a ton of memory forever
         }
 
@@ -235,15 +244,16 @@ namespace FileSystemSearch
                             _errorHandler("Database does not exist.");
                         }
 
-                        dbInUse = true;
 
                         _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
 
+                        dbInUse = true;
+
                         while (dbInUse); //Database context persists until the dbInUse flag is set to false
-                        Console.WriteLine("Test! Do not read this."); 
                     }
                     db.Dispose();
                     GC.Collect();
+
                 }
             });
         }
