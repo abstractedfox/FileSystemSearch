@@ -163,7 +163,7 @@ namespace FileSystemSearch
                 if (debug) Console.WriteLine("DBQueue complete!!! Items added: " + itemsAdded);
                 lock (db)
                 {
-                    db.SaveChanges();
+                    //db.SaveChanges(); //No longer needed
                     operationsPending = false;
                 }
 
@@ -994,25 +994,25 @@ namespace FileSystemSearch
         //Call when handling an unauthorized access exception from the file system
         private static void _UnauthorizedFileHandler(Exception e)
         {
-            Console.WriteLine("Exceptioun!!!!! Unauthorized File ignored");
+            _DebugOutAsync("Exceptioun!!!!! Unauthorized File ignored");
         }
 
 
         private static void _MiscExceptionHandler(Exception e)
         {
-            Console.WriteLine("Exceptioun!!!!!" + e);
+            _DebugOutAsync("Exceptioun!!!!!" + e);
         }
 
 
         private static void _MiscError(string error)
         {
-            Console.WriteLine("DBHandler._MiscError:" + error);
+            _DebugOutAsync("DBHandler._MiscError:" + error);
         }
 
 
         private static void _DebugOut(string debugText)
         {
-            Console.WriteLine("DBHandler._DebugOut: " + debugText);
+            _DebugOutAsync("DBHandler._DebugOut: " + debugText);
         }
 
 
