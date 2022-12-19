@@ -206,7 +206,7 @@ namespace FileSystemSearch
             if (rebuildFromScratch)
             {
                 DBHandler.Clear(ref db);
-
+                dbInUse = false;
                 await DBHandler.AddFolder(db, rootFolder, true, true);
             }
             else
