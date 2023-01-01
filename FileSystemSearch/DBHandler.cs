@@ -15,6 +15,7 @@ using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query.Internal;
 using System.Diagnostics;
+using FileSystemSearch.Migrations;
 
 
 //This class is for performing actions on the database.
@@ -45,7 +46,9 @@ namespace FileSystemSearch
     {
         List<Task> dbTasks;
         List<DataItem> dataItemQueue, dataItemNext;
-        DBClass? db;
+        Object dataItemQueueLock = new Object();
+        Object dataItemNextLock = new Object();
+        Object? dbLockObject;
         bool finished;
         private bool _disposed;
 
@@ -56,12 +59,12 @@ namespace FileSystemSearch
         //The caller can read this to determine if operations are still pending before disposing the db instance
         public bool operationsPending;
 
-        public DBQueue(DBClass dbReference)
+        public DBQueue(Object lockObject)
         {
             dbTasks = new List<Task>();
             dataItemQueue = new List<DataItem>();
             dataItemNext = new List<DataItem>();
-            db = dbReference;
+            dbLockObject = lockObject;
             finished = false;
             operationsPending = false;
             if (debug) _DebugReadout();
@@ -75,7 +78,7 @@ namespace FileSystemSearch
             dbTasks.Clear();
             dataItemQueue.Clear();
             dataItemNext.Clear();
-            db = null;
+            dbLockObject = null;
 
             _disposed = true;
         }
@@ -86,7 +89,7 @@ namespace FileSystemSearch
             dbTasks.Clear();
             dataItemQueue.Clear();
             dataItemNext.Clear();
-            db = null;
+            dbLockObject = null;
 
             _disposed = true;
             GC.SuppressFinalize(this);
@@ -119,9 +122,9 @@ namespace FileSystemSearch
                     //of this class by making it perform effectively synchronously.
                     if (dataItemNext.Count > 0 && dataItemQueue.Count == 0)
                     {
-                        lock (dataItemNext)
+                        lock (dataItemNextLock)
                         {
-                            lock (dataItemQueue)
+                            lock (dataItemQueueLock)
                             {
                                 if (debugQueueInfo) _DebugOutAsync("Flushing " + dataItemNext.Count + " from dataItemNext");
                                 if (debugLocks) _DebugOutAsync("RunQueue dataItemNext lock");
@@ -130,18 +133,19 @@ namespace FileSystemSearch
                                     dataItemQueue.Add(item);
                                 }
                                 //if (debug) _DebugOutAsync("Clearing dataItemNext of " + dataItemNext.Count + " items.");
-                                dataItemNext.Clear();
                             }
+
+                            dataItemNext.Clear();
                         }
                         if (debugLocks) _DebugOutAsync("RunQueue dataItemNext unlock");
                     }
 
                     if (dataItemQueue.Count > 0)
                     {
-                        lock (dataItemQueue)
+                        lock (dataItemQueueLock)
                         {
                             if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue lock");
-                            lock (db)
+                            lock (dbLockObject)
                             {
                                 using (DBClass addItemsInstance = new DBClass())
                                 {
@@ -161,7 +165,7 @@ namespace FileSystemSearch
 
 
                 if (debug) Console.WriteLine("DBQueue complete!!! Items added: " + itemsAdded);
-                lock (db)
+                lock (dbLockObject)
                 {
                     //db.SaveChanges(); //No longer needed
                     operationsPending = false;
@@ -176,7 +180,7 @@ namespace FileSystemSearch
             //This isn't awaited because we don't want the caller loop to block waiting for this to return
             Task.Run(() =>
             {
-                lock (dataItemNext)
+                lock (dataItemNextLock)
                 {
                     if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
                     dataItemNext.Add(item);
@@ -215,11 +219,12 @@ namespace FileSystemSearch
     //A class for sorting items into pattern lists and checking for duplicates.
     //This is a stateful class; it must be instantiated. This is done so the caller can cancel running operations without
     //waiting for them to finish
+    /*
     class Housekeeping
     {
         const bool debug = true;
 
-        DBClass db;
+        Object db;
         int taskLimit;
         List<Task> runningTasks;
         bool cancelHousekeeping;
@@ -229,7 +234,7 @@ namespace FileSystemSearch
 
         public delegate void ResultReturn(DataItem result, ResultCode code);
 
-        public Housekeeping(DBClass dbToUse)
+        public Housekeeping(Object dbToUse)
         {
             runningTasks = new List<Task>();
             dbCopy = new List<DataItem>();
@@ -280,7 +285,7 @@ namespace FileSystemSearch
                     }
 
                     while (GetPendingTasks() > 0) ; //Block if any tasks are incomplete
-
+                    
                     lock (db)
                     {
                         db.SaveChanges();
@@ -423,7 +428,7 @@ namespace FileSystemSearch
                 {
                     RemoveCompletedTasks();
                 }
-                */
+                
             }
             return results;
         }
@@ -471,14 +476,14 @@ namespace FileSystemSearch
             
         }
     }
-
+    */
     internal class DBHandler
     {
         //Add the contents of a single folder to the database.
         //Pass 'true' to arg3 to recursively perform this for subdirectories.
         //Pass 'true' to setDuplicateFlag to automatically set all files as non-duplicates.
         //Recursive is permanently true now. Have fun!
-        public static async Task<ResultCode> AddFolder(DBClass db, System.IO.DirectoryInfo folder, bool recursive, bool setDuplicateFlag)
+        public static async Task<ResultCode> AddFolder(Object dbLockObject, System.IO.DirectoryInfo folder, bool recursive, bool setDuplicateFlag)
         {
             System.IO.FileInfo[] files = null;
 
@@ -486,7 +491,7 @@ namespace FileSystemSearch
 
             if (recursive)
             {
-                if (await _AddFolderRecursiveContainer(db, folder, setDuplicateFlag) == ResultCode.SUCCESS)
+                if (await _AddFolderRecursiveContainer(dbLockObject, folder, setDuplicateFlag) == ResultCode.SUCCESS)
                 {
                     return ResultCode.SUCCESS;
                 }
@@ -498,20 +503,27 @@ namespace FileSystemSearch
         }
 
 
-        //Pass a path to a single file to add it to the database. Currently empty.
-        public static void AddItem(DBClass db, string path)
+        //Pass a path to a single file to add it to the database. Currently empty as it's not super necessary right now
+        public static void AddItem(Object db, string path)
         {
 
         }
 
 
-        //Pass a DataItem and it will add it to the database.
-        public static async Task<ResultCode> AddItem(DBClass db, DataItem item)
+        //Add a single DataItem. Mildly unnecessary but it's here if you want it
+        public static async Task<ResultCode> AddItem(Object dbLockObject, DataItem item)
         {
             try
             {
-                db.Add(item);
-                return ResultCode.SUCCESS;
+                lock (dbLockObject)
+                {
+                    using (DBClass db = new DBClass())
+                    {
+                        db.Add(item);
+                        db.SaveChanges();
+                        return ResultCode.SUCCESS;
+                    }
+                }
             }
             catch
             {
@@ -521,98 +533,113 @@ namespace FileSystemSearch
 
         
         //Remove a list
-        public static ResultCode RemoveItem(DBClass db, PatternList list)
+        public static ResultCode RemoveItem(Object dbLockObject, PatternList list)
         {
-            IQueryable listToDelete = from PatternList in db.PatternLists
-                              where PatternList == list
-                              select PatternList;
-
-
-
-            foreach (PatternList deleteThis in listToDelete)
+            using (DBClass db = new DBClass())
             {
-
-                IQueryable dataItemPatternListsToDelete = from DataItemPatternList in db.DataItemPatternLists
-                                                          where DataItemPatternList.PatternList == list
-                                                          select DataItemPatternList;
-
-                foreach (DataItem associationToDelete in dataItemPatternListsToDelete)
+                lock (dbLockObject)
                 {
-                    db.Remove(associationToDelete);
+                    IQueryable listToDelete = from PatternList in db.PatternLists
+                                              where PatternList == list
+                                              select PatternList;
+
+
+
+                    foreach (PatternList deleteThis in listToDelete)
+                    {
+
+                        IQueryable dataItemPatternListsToDelete = from DataItemPatternList in db.DataItemPatternLists
+                                                                  where DataItemPatternList.PatternList == list
+                                                                  select DataItemPatternList;
+
+                        foreach (DataItem associationToDelete in dataItemPatternListsToDelete)
+                        {
+                            db.Remove(associationToDelete);
+                        }
+
+                        try
+                        {
+                            Console.WriteLine("Deleting pattern list: " + deleteThis.pattern);
+
+                            db.Remove(deleteThis);
+                        }
+                        catch (Exception e)
+                        {
+                            _DebugOut("Exception thrown when attempting to delete a list: " + e);
+                        }
+                    }
+
+
+                    db.SaveChanges();
                 }
 
-                try
-                {
-                    Console.WriteLine("Deleting pattern list: " + deleteThis.pattern);
-                    
-                    db.Remove(deleteThis);
-                }
-                catch (Exception e)
-                {
-                    _DebugOut("Exception thrown when attempting to delete a list: " + e);
-                }
+                return ResultCode.SUCCESS;
             }
-
-
-            db.SaveChanges();
-
-            return ResultCode.SUCCESS;
         }
 
 
         //Remove an item
-        public static ResultCode RemoveItem(DBClass db, DataItem item)
+        public static ResultCode RemoveItem(Object dbLockObject, DataItem item)
         {
-            IQueryable validateItem = from DataItem in db.DataItems
-                              where DataItem == item
-                              select DataItem;
-
-            int foundItems = 0;
-
-            foreach (DataItem test in validateItem)
+            lock (dbLockObject) 
             {
-                foundItems++;
+                using (DBClass db = new DBClass())
+                {
+                    IQueryable validateItem = from DataItem in db.DataItems
+                                              where DataItem == item
+                                              select DataItem;
+
+                    int foundItems = 0;
+
+                    foreach (DataItem test in validateItem)
+                    {
+                        foundItems++;
+                    }
+
+                    if (foundItems == 0) return ResultCode.ITEM_NOT_FOUND;
+
+
+                    IQueryable associations = from DataItemPatternList in db.DataItemPatternLists
+                                              where DataItemPatternList.DataItem == item
+                                              select DataItemPatternList;
+
+
+                    foreach (DataItem associationToDelete in associations)
+                    {
+                        db.Remove(associationToDelete);
+                    }
+
+
+                    db.Remove(item);
+
+                    db.SaveChanges();
+                }
+                return ResultCode.SUCCESS;
             }
-
-            if (foundItems == 0) return ResultCode.ITEM_NOT_FOUND;
-
-            
-            IQueryable associations = from DataItemPatternList in db.DataItemPatternLists
-                                      where DataItemPatternList.DataItem == item
-                                      select DataItemPatternList;
-            
-
-            foreach (DataItem associationToDelete in associations)
-            {
-                db.Remove(associationToDelete);
-            }
-
-
-            db.Remove(item);
-
-            db.SaveChanges();
-            
-            return ResultCode.SUCCESS;
         }
 
 
         //Remove items matching a query. Doesn't automatically save changes.
-        public static void RemoveItems(DBClass db, IQueryable query)
+        public static void RemoveItems(Object dbLockObject, IQueryable query)
         {
-            using (DBClass removeItemsInstance = new DBClass())
+            lock (dbLockObject)
             {
-                foreach (DataItem item in query)
+                using (DBClass removeItemsInstance = new DBClass())
                 {
-                    try
+                
+                    foreach (DataItem item in query)
                     {
-                        removeItemsInstance.Remove(item);
+                        try
+                        {
+                            removeItemsInstance.Remove(item);
+                        }
+                        catch (Exception e)
+                        {
+                            _MiscExceptionHandler(e);
+                        }
                     }
-                    catch (Exception e)
-                    {
-                        _MiscExceptionHandler(e);
-                    }
+                    removeItemsInstance.SaveChanges();
                 }
-                removeItemsInstance.SaveChanges();
             }
 
             GC.Collect();
@@ -620,29 +647,32 @@ namespace FileSystemSearch
 
 
         //Clears the entire database
-        public static void Clear(ref DBClass db)
+        public static void Clear(Object dbLockObject)
         {
-            using (DBClass removeItemsInstance = new DBClass())
+            lock (dbLockObject)
             {
-                IQueryable dataItems = from DataItem in removeItemsInstance.DataItems
-                                       select DataItem;
+                using (DBClass removeItemsInstance = new DBClass())
+                {
+                    IQueryable dataItems = from DataItem in removeItemsInstance.DataItems
+                                           select DataItem;
 
-                IQueryable patternLists = from PatternList in removeItemsInstance.PatternLists
-                                          select PatternList;
+                    IQueryable patternLists = from PatternList in removeItemsInstance.PatternLists
+                                              select PatternList;
 
-                IQueryable dataItemPatternLists = from DataItemPatternList in removeItemsInstance.DataItemPatternLists
-                                                  select DataItemPatternList;
+                    IQueryable dataItemPatternLists = from DataItemPatternList in removeItemsInstance.DataItemPatternLists
+                                                      select DataItemPatternList;
 
-                if (removeItemsInstance.DataItems.Count() > 0) RemoveItems(removeItemsInstance, dataItems);
-                if (removeItemsInstance.PatternLists.Count() > 0) RemoveItems(removeItemsInstance, patternLists);
-                if (removeItemsInstance.DataItemPatternLists.Count() > 0) RemoveItems(removeItemsInstance, dataItemPatternLists);
-                removeItemsInstance.SaveChanges();
+                    if (removeItemsInstance.DataItems.Count() > 0) RemoveItems(removeItemsInstance, dataItems);
+                    if (removeItemsInstance.PatternLists.Count() > 0) RemoveItems(removeItemsInstance, patternLists);
+                    if (removeItemsInstance.DataItemPatternLists.Count() > 0) RemoveItems(removeItemsInstance, dataItemPatternLists);
+                    removeItemsInstance.SaveChanges();
+                }
             }
             GC.Collect();
         }
 
 
-        //Verify that an item exists
+        //Verify that an item exists in the file system
         public static ResultCode VerifyItem(DataItem item)
         {
             if (item == null)
@@ -666,34 +696,42 @@ namespace FileSystemSearch
 
 
         //Create a new pattern list. Performs duplicate check.
-        public static ResultCode CreatePatternList(DBClass db, string newPattern)
+        /*
+        public static ResultCode CreatePatternList(Object dbLockObject, string newPattern)
         {
             const bool debug = true;
             const string debugName = "_CreatePatternList:";
 
-            if (_IsDuplicate(db, newPattern))
+            lock (dbLockObject)
             {
-                return ResultCode.DUPLICATE_FOUND;
+                using (DBClass db = new DBClass())
+                {
+                    if (_IsDuplicate(db, newPattern))
+                    {
+                        return ResultCode.DUPLICATE_FOUND;
+                    }
+
+                    PatternList newList = new PatternList { pattern = newPattern };
+
+                    if (debug) _DebugOut(debugName + "New pattern list added: " + newList.pattern);
+
+                    lock (db)
+                    {
+                        db.Add(newList);
+
+                        db.SaveChanges();
+                    }
+                    //this has to be done here or the next duplicate check will check the DB on disk and miss
+                    //a possible duplicate
+                }
             }
-
-            PatternList newList = new PatternList { pattern = newPattern };
-
-            if (debug) _DebugOut(debugName + "New pattern list added: " + newList.pattern);
-
-            lock (db)
-            {
-                db.Add(newList);
-
-                db.SaveChanges();
-            }
-            //this has to be done here or the next duplicate check will check the DB on disk and miss
-            //a possible duplicate
-
             return ResultCode.SUCCESS;
         }
+        */
 
-
-        //Generate pattern lists based on common patterns. This will only create lists, it doesn't populate them
+        //Generate pattern lists based on common patterns. This will only create lists, it doesn't populate them.
+        //Review if we actually need this
+        /*
         public static void GeneratePatterns(DBClass db)
         {
             //Just to get this off the ground, this will currently
@@ -713,10 +751,12 @@ namespace FileSystemSearch
             }
 
             db.SaveChanges();
-        }
+        }*/
 
 
         //Populate pattern lists with all relevant DataItems
+        //Review if we actually need this
+        /*
         public static ResultCode PopulatePatternLists(DBClass db)
         {
             const bool verbose = true;
@@ -750,39 +790,32 @@ namespace FileSystemSearch
 
             db.SaveChanges();
             return ResultCode.SUCCESS;
-        }
+        }*/
 
 
-        //Combine two pattern lists into one. Args 2 and 3 are keys to both lists. Functionality pending on future updates
-        public static void CombinePatternLists(DBClass db, long listPKey1, long listPKey2)
+
+        //Format a database to a list. This is slow and will consume a lot of memory.
+        public static List<DataItem> DBToList(Object dbLockObject)
         {
+            lock (dbLockObject)
+            {
+                using (DBClass db = new DBClass())
+                {
+                    const bool debug = true;
 
-        }
+                    if (debug) _DebugOut("DBToList: Start");
 
+                    List<DataItem> theList = new List<DataItem>();
 
-        //Find and combine lists whose members are >similarity% in common. Functionality pending
-        public static void SimplifyLists(DBClass db, int similarity)
-        {
+                    IQueryable theItems = from DataItem in db.DataItems select DataItem;
 
-        }
+                    foreach (DataItem item in theItems) theList.Add(item);
 
+                    if (debug) _DebugOut("DBToList: End");
 
-        //Format a database to a list. This is slow and will consume a lot of memory, but will enable fast DB actions when completed
-        public static List<DataItem> DBToList(DBClass db)
-        {
-            const bool debug = true;
-
-            if (debug) _DebugOut("DBToList: Start");
-
-            List<DataItem> theList = new List<DataItem>();
-
-            IQueryable theItems = from DataItem in db.DataItems select DataItem;
-
-            foreach (DataItem item in theItems) theList.Add(item);
-
-            if (debug) _DebugOut("DBToList: End");
-
-            return theList;
+                    return theList;
+                }
+            }
         }
         
 
@@ -795,12 +828,12 @@ namespace FileSystemSearch
         //**********************Private functions below
 
         //Call this to perform a recursive folder add. Set setDuplicateFlag = true to mark all results as duplicate checked
-        private static async Task<ResultCode> _AddFolderRecursiveContainer(DBClass db, System.IO.DirectoryInfo rootFolder, bool setDuplicateFlag)
+        private static async Task<ResultCode> _AddFolderRecursiveContainer(Object dbLockObject, System.IO.DirectoryInfo rootFolder, bool setDuplicateFlag)
         {
             const bool debug = true;
             const string debugName = "_AddFolderRecursiveContainer:";
 
-            using (DBQueue queue = new DBQueue(db))
+            using (DBQueue queue = new DBQueue(dbLockObject))
             {
 
                 List<System.IO.DirectoryInfo> folders = new List<System.IO.DirectoryInfo>();
@@ -809,7 +842,7 @@ namespace FileSystemSearch
                 //to return before the queue has begun processing
                 queue.RunQueue();
 
-                await _AddFolderRecursive(db, rootFolder, folders, queue, setDuplicateFlag);
+                await _AddFolderRecursive(dbLockObject, rootFolder, folders, queue, setDuplicateFlag);
 
                 while (folders.Count > 0)
                 {
@@ -817,7 +850,7 @@ namespace FileSystemSearch
                     {
                         _DebugOutAsync(debugName + "Calling _AddFolderRecursive with :" + folders.Last<DirectoryInfo>().FullName);
                     }
-                    await _AddFolderRecursive(db, folders.Last<DirectoryInfo>(), folders, queue, setDuplicateFlag);
+                    await _AddFolderRecursive(dbLockObject, folders.Last<DirectoryInfo>(), folders, queue, setDuplicateFlag);
                 }
 
                 queue.SetComplete();
@@ -833,12 +866,12 @@ namespace FileSystemSearch
         }
 
 
-        //arg1 is db, arg2 is the folder whose files to add, arg3 is a reference to a list which will receive any additional
+        //arg1 is the lock object, arg2 is the folder whose files to add, arg3 is a reference to a list which will receive any additional
         //folders found. This function is not to be called directly; _AddFolderRecursiveContainer should be called with the
         //root folder and it will call this as long as more folders are found.
         //True recursion is avoided due to potential stack overflow if there are many directories.
         //Set setDuplicateFlag = true to mark all results as duplicate-checked
-        private static async Task<ResultCode> _AddFolderRecursive(DBClass db, System.IO.DirectoryInfo folder, 
+        private static async Task<ResultCode> _AddFolderRecursive(Object dbLockObject, System.IO.DirectoryInfo folder, 
             List<System.IO.DirectoryInfo> nextFolder, DBQueue queue, bool setDuplicateFlag)
         {
             const bool debug = false, verbose = false, debugLocks = false;
@@ -942,35 +975,42 @@ namespace FileSystemSearch
 
 
         //Check whether an identical DataItem is already in this database
-        private async static Task<bool> _IsDuplicate(DBClass db, DataItem itemToCheck)
+        private async static Task<bool> _IsDuplicate(Object dbLockObject, DataItem itemToCheck)
         {
-            bool foundDupe = false;
-
-            int keysFound = 0;
-                
-            IQueryable findDupe = from DataItem in db.DataItems
-                                    where DataItem.FullPath == itemToCheck.FullPath
-                                    select DataItem;
-
-            await Task.Run(() =>
+            lock (dbLockObject)
             {
+                using (DBClass db = new DBClass())
                 {
-                    foreach (DataItem item in findDupe)
-                    {
-                        foundDupe = true;
-                        break;
-                    }
-                }
-            });
+                    bool foundDupe = false;
 
-            if (foundDupe) return true;
-            return false;
+                    int keysFound = 0;
+
+                    IQueryable findDupe = from DataItem in db.DataItems
+                                          where DataItem.FullPath == itemToCheck.FullPath
+                                          select DataItem;
+
+                    //await Task.Run(() =>
+                    {
+                        {
+                            foreach (DataItem item in findDupe)
+                            {
+                                foundDupe = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (foundDupe) return true;
+                    return false;
+                }
+            }
 
         }
 
 
         //Check whether an identical pattern list is already in this database
-        private static bool _IsDuplicate(DBClass db, string pattern)
+        /*
+        private static bool _IsDuplicate(Object db, string pattern)
         {
             int keysFound = 0;
 
@@ -988,7 +1028,7 @@ namespace FileSystemSearch
             }
 
             return false;
-        }
+        }*/
 
 
         //Call when handling an unauthorized access exception from the file system

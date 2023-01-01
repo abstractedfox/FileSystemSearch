@@ -18,7 +18,7 @@ namespace FileSystemSearch
     internal class CLI
     {
         private bool dbInUse;
-        private DBClass db;
+        private Object dbLockObject = new Object();
         private List<DataItem> results;
         private bool exit;
 
@@ -119,11 +119,11 @@ namespace FileSystemSearch
 
             if (query.Contains("\""))
             {
-                DataSearch.ParsedQuerySearch(db, query, _ReceiveData);
+                DataSearch.ParsedQuerySearch(dbLockObject, query, _ReceiveData);
             }
             else
             {
-                Task searchTask = DataSearch.DirectQuerySearch(db, query, _ReceiveData);
+                Task searchTask = DataSearch.QuerySearch(dbLockObject, query, _ReceiveData);
             }
 
             return;
@@ -205,13 +205,13 @@ namespace FileSystemSearch
 
             if (rebuildFromScratch)
             {
-                DBHandler.Clear(ref db);
+                DBHandler.Clear(dbLockObject);
                 dbInUse = false;
-                await DBHandler.AddFolder(db, rootFolder, true, true);
+                await DBHandler.AddFolder(dbLockObject, rootFolder, true, true);
             }
             else
             {
-                await DBHandler.AddFolder(db, rootFolder, true, false);
+                await DBHandler.AddFolder(dbLockObject, rootFolder, true, false);
             }
 
             
@@ -228,12 +228,32 @@ namespace FileSystemSearch
         //Initialize the database context
         private async void Initialize()
         {
+            if (false)
+            {
+                lock (dbLockObject)
+                {
+                    using (DBClass db = new DBClass())
+                    {
+                        if (db == null)
+                        {
+                            _errorHandler("Database returned null.");
+                        }
+                        if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
+                        {
+                            _errorHandler("Database does not exist.");
+                        }
+                    }
+                }
+
+                return;
+            }
+            
             //Because this re-initializes the database if the instance closes, it must be non-blocking
             await Task.Run(() =>
             {
                 while (!exit) //If the database instance is closed but exit is false, initialize a new instance
                 {
-                    using (db = new DBClass())
+                    using (DBClass db = new DBClass())
                     {
                         if (db == null)
                         {
@@ -247,12 +267,11 @@ namespace FileSystemSearch
 
                         _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
 
-                        dbInUse = true;
-
-                        while (dbInUse); //Database context persists until the dbInUse flag is set to false
                     }
-                    db.Dispose();
-                    GC.Collect();
+                    dbInUse = true;
+
+                    while (dbInUse); //Database context persists until the dbInUse flag is set to false
+
 
                 }
             });

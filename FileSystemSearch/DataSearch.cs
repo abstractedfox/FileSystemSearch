@@ -19,71 +19,6 @@ namespace FileSystemSearch
     {
         public delegate void ResultReturn(DataItem result);
 
-        //Search a single pattern list for a query.
-        //This may no longer be necessary (deletion candidate)
-        /*
-        public static async Task PatternListSearch(DBClass db, string query, ResultReturn receiveData, PatternList list)
-        {
-            const string debugName = "DataSearch.PatternListSearch:";
-            const bool verbose = true;
-
-            IQueryable listsInDB = from PatternList in db.PatternLists
-                                   where PatternList.Id == list.Id
-                                   select PatternList;
-
-            int verifyCount = 0;
-            foreach (PatternList aList in listsInDB)
-            {
-                verifyCount++;
-                if (aList != list)
-                {
-                    _DebugOut(debugName + "Passed list did not match the equivalent ID in the index.");
-                    return;
-                }
-            }
-            if (verifyCount == 0)
-            {
-                _DebugOut(debugName + "Passed list did not match a list in the index.");
-                return;
-            }
-            if (verifyCount > 1)
-            {
-                _DebugOut(debugName + "Too many matching lists were discovered.");
-                return;
-            }
-
-            if (verbose)
-            {
-                _DebugOut(debugName + "Searching pattern list: " + list.pattern);
-            }
-
-            IQueryable listContents = from DataItemPatternList in db.DataItemPatternLists
-                                      where DataItemPatternList.PatternList == list
-                                      select DataItemPatternList.DataItemId;
-
-            //Yes, for some reason, you can access the IDs from this table but not the actual DataItems
-
-            List<DataItem> dataItemsToSearch = new List<DataItem>();
-
-            foreach (long anId in listContents)
-            {
-                try
-                {
-                    DataItem item = db.DataItems.First(id => id.Id == anId);
-                    if (item.CaseInsensitiveFilename.Contains(query))
-                    {
-                        receiveData(item);
-                    }
-                }
-                catch (NullReferenceException)
-                {
-                    _NullReferenceExceptionHandler();
-                }
-            }
-
-
-        }
-        */
 
         //Search the contents of 'setToSearch' for 'query'. receiveData will be called with any results found
         public static async Task<Task> SearchDataItemList(DBClass db, string query, ResultReturn receiveData, List<DataItem> setToSearch)
@@ -102,59 +37,30 @@ namespace FileSystemSearch
         }
 
 
-        //Search by scaling pattern lists first
-        //Revisit this after we decide how we want to implement 'baking' the index
-        /*
-        public static async Task SmartSearch(DBClass db, string query, ResultReturn receiveData, int taskLimit)
+
+
+        //Exactly what it sounds like
+        public static async Task<Task> QuerySearch(Object dbLockObject, string query, ResultReturn receiveData)
         {
-            const bool debug = true;
-            const string debugName = "DataSearch.SmartSearch:";
-
-
-            if (debug)
-            {
-                _DebugOut(debugName + "Start");
-            }
-
-            IQueryable relevantLists = from DataItemPatternList in db.DataItemPatternLists
-                                       where query.Contains(DataItemPatternList.PatternList.pattern)
-                                       select DataItemPatternList;
-
-            List<DataItemPatternList> lists = new List<DataItemPatternList>();
-
-            lock (db)
-            {
-                foreach (DataItemPatternList list in relevantLists) lists.Add(list);
-            }
-
-            List <Task> tasks = new List<Task>();
-
             
-            
-        }
-        */
-
-
-        //Testing the speed of well-structured queries
-        public static async Task<Task> DirectQuerySearch(DBClass db, string query, ResultReturn receiveData)
-        {
             const bool debug = true;
             const string debugName = "DataSearch.DirectQuerySearch:";
 
             if (debug) _DebugOut(debugName + "Called");
 
-            IQueryable queryResults = from DataItem in db.DataItems
-                                      where DataItem.CaseInsensitiveFilename.Contains(query.ToLower())
-                                      select DataItem;
-
-
             return Task.Run(() =>
             {
-                lock (db)
+                lock (dbLockObject)
                 {
-                    foreach (DataItem item in queryResults)
+                    using (DBClass db = new DBClass())
                     {
-                        receiveData(item);
+                        IQueryable queryResults = from DataItem in db.DataItems
+                                                  where DataItem.CaseInsensitiveFilename.Contains(query.ToLower())
+                                                  select DataItem;
+                        foreach (DataItem item in queryResults)
+                        {
+                            receiveData(item);
+                        }
                     }
                 }
 
@@ -162,7 +68,7 @@ namespace FileSystemSearch
             });
         }
 
-        public static ResultCode ParsedQuerySearch(DBClass db, string input, ResultReturn receiveData)
+        public static ResultCode ParsedQuerySearch(Object dbLockObject, string input, ResultReturn receiveData)
         {
             //Input should be formatted as queries contained in pairs of quotes
             List<string> queries = new List<string>();
@@ -228,7 +134,8 @@ namespace FileSystemSearch
         }
 
         //Returns all DataItems associated with a pattern list
-        public static List<DataItem> GetPatternListContents(DBClass db, PatternList list)
+        /*
+        public static List<DataItem> GetPatternListContents(Object db, PatternList list)
         {
             IQueryable listContents = from DataItemPatternList in db.DataItemPatternLists
                                       where DataItemPatternList.PatternList.pattern == list.pattern
@@ -242,11 +149,12 @@ namespace FileSystemSearch
             }
 
             return results;
-        }
+        }*/
 
 
         //Returns the pattern lists that are relevant to a query.
-        public static List<PatternList> FindMatchingPatternLists(DBClass db, string query)
+        /*
+        public static List<PatternList> FindMatchingPatternLists(Object db, string query)
         {
             List<PatternList> foundLists = new List<PatternList>();
 
@@ -260,7 +168,7 @@ namespace FileSystemSearch
             }
 
             return foundLists;
-        }
+        }*/
 
 
         //*********************Private methods
