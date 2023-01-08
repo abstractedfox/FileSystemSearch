@@ -17,39 +17,36 @@ namespace FileSystemSearch
     //This class is for processing CLI functionality. Instantiate one CLI object at a time or there will be sqlite conflicts.
     internal class CLI
     {
-        private bool dbInUse;
-        private Object dbLockObject = new Object();
-        private List<DataItem> results;
-        private bool exit;
+        private Object _dbLockObject = new Object();
+        private List<DataItem> _results;
+        private bool _exit;
 
         const string userHelpText = "To perform a search, simply type any query. To select a result, enter the number of that result into the prompt.\n" +
-            "Results will appear as they are discovered, and entry selections can be made at any time, even if the search is still in progress." +
+            "To perform an advanced search, put each desired string in a pair of quotation marks. To search the full path, place a : at the beginning of a string.\n" +
+            "Example: \"iidx\" \".jpg\" \":\\memes\\\" (search for jpgs with 'iidx' in the name in any path containing 'memes')\n" +
+            "Results will appear as they are discovered, and entry selections can be made at any time, even if the search is still in progress.\n" +
             "Commands:\n" +
-            "\"/buildindex\" Add to the existing index from a chosen directory. Prompts for a root directory after calling." +
-            "\"/rebuildindex\" Rebuild the index starting at a chosen directory. Erases the existing index first." +
+            "\"/buildindex\" Add to the existing index from a chosen directory. Prompts for a root directory after calling.\n" +
+            "\"/rebuildindex\" Rebuild the index starting at a chosen directory. Erases the existing index first.\n" +
             "\"/help\" View this help text.\n" +
             "\"/exit\" Exit the search utility.";
 
         public CLI()
         {
-            dbInUse = false;
-            results = new List<DataItem>();
-            exit = false;
+            _results = new List<DataItem>();
+            _exit = false;
 
             Initialize();
         }
 
-
+        
         //Enter a loop which will continuously wait for user input.
         public async void CLILoopEntry()
         {
-            while (!dbInUse)
-            {
-                //If this starts before the database initialization is complete, wait.
-            }
-            while (!exit) 
+            while (!_exit) 
             {
                 //note: make this a switch statement
+                //better note: replace this with an actual parser
                 _userOutput("Enter a query or command! Enter \"/help\" for help.");
 
                 string? input = Console.ReadLine();
@@ -68,8 +65,7 @@ namespace FileSystemSearch
 
                 if (input == "/exit")
                 {
-                    exit = true;
-                    continue;
+                    Environment.Exit(0);
                 }
 
                 if (input == "/buildindex")
@@ -83,7 +79,7 @@ namespace FileSystemSearch
                     {
                         continue;
                     }
-                    BuildIndex(input, false);
+                    await BuildIndex(input, false);
 
                     continue;
                 }
@@ -99,7 +95,7 @@ namespace FileSystemSearch
                     {
                         continue;
                     }
-                    BuildIndex(input, true);
+                    await BuildIndex(input, true);
 
                     continue;
                 }
@@ -114,16 +110,16 @@ namespace FileSystemSearch
 
         public async Task Search(string query)
         {
-            results.Clear();
+            _results.Clear();
             GC.Collect(); //Cleanup in case a significant number of results left a lot of memory in GC limbo
 
             if (query.Contains("\""))
             {
-                DataSearch.ParsedQuerySearch(dbLockObject, query, _ReceiveData);
+                DataSearch.ParsedQuerySearch(_dbLockObject, query, _ReceiveData);
             }
             else
             {
-                Task searchTask = DataSearch.QuerySearch(dbLockObject, query, _ReceiveData);
+                Task searchTask = DataSearch.QuerySearch(_dbLockObject, query, _ReceiveData);
             }
 
             return;
@@ -141,18 +137,13 @@ namespace FileSystemSearch
                 {
                     return;
                 }
-                if (input == "/exit")
-                {
-                    exit = true;
-                    return;
-                }
 
                 int resultNumber;
 
                 try
                 {
                     resultNumber = int.Parse(input);
-                    if (resultNumber < 0 || resultNumber > results.Count - 1)
+                    if (resultNumber < 0 || resultNumber > _results.Count - 1)
                     {
                         _userOutput("Invalid result selection.");
                     }
@@ -170,24 +161,24 @@ namespace FileSystemSearch
         //Pass a position in the 'results' list. If it's a valid position, the file is opened in Explorer
         public void SelectResult(int resultNumber)
         {
-            if (resultNumber < 0 || resultNumber > results.Count - 1)
+            if (resultNumber < 0 || resultNumber > _results.Count - 1)
             {
                 return;
             }
 
-            if (!results[resultNumber].IsFolder)
+            if (!_results[resultNumber].IsFolder)
             {
-                System.Diagnostics.Process.Start("explorer.exe", String.Format("/select,\"{0}\"", results[resultNumber].FullPath));
+                System.Diagnostics.Process.Start("explorer.exe", String.Format("/select,\"{0}\"", _results[resultNumber].FullPath));
             }
             else
             {
-                System.Diagnostics.Process.Start("explorer.exe", String.Format("/n,\"{0}\"", results[resultNumber].FullPath));
+                System.Diagnostics.Process.Start("explorer.exe", String.Format("/n,\"{0}\"", _results[resultNumber].FullPath));
             }
         }
 
 
         //Build or rebuild the index from the passed path. If "rebuildFromScratch" == true, it empties the database first.
-        public async void BuildIndex(string path, bool rebuildFromScratch)
+        public async Task BuildIndex(string path, bool rebuildFromScratch)
         {
             if (path == null)
             {
@@ -201,25 +192,22 @@ namespace FileSystemSearch
                 return;
             }
 
-            _userOutput("Initializing index.");
 
             if (rebuildFromScratch)
             {
-                DBHandler.Clear(dbLockObject);
-                dbInUse = false;
-                await DBHandler.AddFolder(dbLockObject, rootFolder, true, true);
+                _userOutput("Initializing index.");
+                DBHandler.Clear(_dbLockObject);
+                await DBHandler.AddFolder(_dbLockObject, rootFolder, true, true);
             }
             else
             {
-                await DBHandler.AddFolder(dbLockObject, rootFolder, true, false);
+                await DBHandler.AddFolder(_dbLockObject, rootFolder, true, false);
             }
 
             
             GC.Collect();
 
             _userOutput("Index complete.");
-            
-            dbInUse = false; //Close the DB instance or it will sit there using a ton of memory forever
         }
 
 
@@ -228,9 +216,7 @@ namespace FileSystemSearch
         //Initialize the database context
         private async void Initialize()
         {
-            if (false)
-            {
-                lock (dbLockObject)
+                lock (_dbLockObject)
                 {
                     using (DBClass db = new DBClass())
                     {
@@ -242,39 +228,12 @@ namespace FileSystemSearch
                         {
                             _errorHandler("Database does not exist.");
                         }
+
+                        _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
                     }
                 }
 
                 return;
-            }
-            
-            //Because this re-initializes the database if the instance closes, it must be non-blocking
-            await Task.Run(() =>
-            {
-                while (!exit) //If the database instance is closed but exit is false, initialize a new instance
-                {
-                    using (DBClass db = new DBClass())
-                    {
-                        if (db == null)
-                        {
-                            _errorHandler("Database returned null.");
-                        }
-                        if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
-                        {
-                            _errorHandler("Database does not exist.");
-                        }
-
-
-                        _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
-
-                    }
-                    dbInUse = true;
-
-                    while (dbInUse); //Database context persists until the dbInUse flag is set to false
-
-
-                }
-            });
         }
 
 
@@ -285,8 +244,8 @@ namespace FileSystemSearch
             //if (!_AlreadyExists(results, data) && DBHandler.VerifyItem(data) == ResultCode.SUCCESS)
             if (DBHandler.VerifyItem(data) == ResultCode.SUCCESS)
             {
-                results.Add(data);
-                _userOutput("[" + (results.Count - 1) + "] " + data.FullPath);
+                _results.Add(data);
+                _userOutput("[" + (_results.Count - 1) + "] " + data.FullPath);
             }
         }
 

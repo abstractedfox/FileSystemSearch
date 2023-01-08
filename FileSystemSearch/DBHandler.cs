@@ -39,182 +39,6 @@ namespace FileSystemSearch
         DUPLICATE_FOUND
     }
 
-    //A class for queueing database actions.
-    //This is meant to enable some aspects of large file additions to work asynchronously while
-    //keeping actual database writes synchronous
-    class DBQueue : IDisposable
-    {
-        List<Task> dbTasks;
-        List<DataItem> dataItemQueue, dataItemNext;
-        Object dataItemQueueLock = new Object();
-        Object dataItemNextLock = new Object();
-        Object? dbLockObject;
-        bool finished;
-        private bool _disposed;
-
-        int itemsAdded;
-
-        const bool debug = false, debugLocks = false;
-
-        //The caller can read this to determine if operations are still pending before disposing the db instance
-        public bool operationsPending;
-
-        public DBQueue(Object lockObject)
-        {
-            dbTasks = new List<Task>();
-            dataItemQueue = new List<DataItem>();
-            dataItemNext = new List<DataItem>();
-            dbLockObject = lockObject;
-            finished = false;
-            operationsPending = false;
-            if (debug) _DebugReadout();
-            _disposed = false;
-
-            itemsAdded = 0;
-        }
-
-        ~DBQueue(){
-            if (_disposed) return;
-            dbTasks.Clear();
-            dataItemQueue.Clear();
-            dataItemNext.Clear();
-            dbLockObject = null;
-
-            _disposed = true;
-        }
-
-        public void Dispose()
-        {
-            if (_disposed) return;
-            dbTasks.Clear();
-            dataItemQueue.Clear();
-            dataItemNext.Clear();
-            dbLockObject = null;
-
-            _disposed = true;
-            GC.SuppressFinalize(this);
-        }
-
-        public async void RunQueue()
-        {
-            const string debugName = "DBQueue.RunQueue():";
-            await Task.Run(() => {
-                operationsPending = true;
-
-                bool debugQueueInfo = false;
-                bool superdebug = false;
-                while (true)
-                {
-                    //Run continuously until the caller says it's done sending data.
-                    if (finished == true && dataItemQueue.Count == 0 && dataItemNext.Count == 0)
-                    {
-                        if (debug) _DebugOutAsync(debugName + "Break conditions met, exiting RunQueue loop.");
-                        break;
-                    }
-                    if (dataItemQueue.Count == 0 && dataItemNext.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    if (superdebug) _DebugOutAsync("RunQueue Continue");
-
-                    //This arrangement is intended to prevent a situation where locking dataItemQueue could defeat the purpose
-                    //of this class by making it perform effectively synchronously.
-                    if (dataItemNext.Count > 0 && dataItemQueue.Count == 0)
-                    {
-                        lock (dataItemNextLock)
-                        {
-                            lock (dataItemQueueLock)
-                            {
-                                if (debugQueueInfo) _DebugOutAsync("Flushing " + dataItemNext.Count + " from dataItemNext");
-                                if (debugLocks) _DebugOutAsync("RunQueue dataItemNext lock");
-                                foreach (DataItem item in dataItemNext)
-                                {
-                                    dataItemQueue.Add(item);
-                                }
-                                //if (debug) _DebugOutAsync("Clearing dataItemNext of " + dataItemNext.Count + " items.");
-                            }
-
-                            dataItemNext.Clear();
-                        }
-                        if (debugLocks) _DebugOutAsync("RunQueue dataItemNext unlock");
-                    }
-
-                    if (dataItemQueue.Count > 0)
-                    {
-                        lock (dataItemQueueLock)
-                        {
-                            if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue lock");
-                            lock (dbLockObject)
-                            {
-                                using (DBClass addItemsInstance = new DBClass())
-                                {
-                                    foreach (DataItem item in dataItemQueue)
-                                    {
-                                        addItemsInstance.Add(item);
-                                        itemsAdded++;
-                                    }
-                                    addItemsInstance.SaveChanges();
-                                }
-                            }
-                            dataItemQueue.Clear();
-                        }
-                        if (debugLocks) _DebugOutAsync("RunQueue dataItemQueue unlock");
-                    }
-                }
-
-
-                if (debug) Console.WriteLine("DBQueue complete!!! Items added: " + itemsAdded);
-                lock (dbLockObject)
-                {
-                    //db.SaveChanges(); //No longer needed
-                    operationsPending = false;
-                }
-
-                
-            });
-        }
-
-        public async void AddToQueue(DataItem item)
-        {
-            //This isn't awaited because we don't want the caller loop to block waiting for this to return
-            Task.Run(() =>
-            {
-                lock (dataItemNextLock)
-                {
-                    if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
-                    dataItemNext.Add(item);
-                }
-                if (debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock");
-            });
-        }
-
-        public void SetComplete()
-        {
-            _DebugOutAsync("SetComplete hit! dataItemNext count: " + dataItemNext.Count + " dataItemQueue count: " + dataItemQueue.Count);
-            finished = true;
-        }
-
-        private async void _DebugReadout()
-        {
-            while (!finished || operationsPending)
-            {
-                await Task.Delay((1000));
-                Console.WriteLine("Queue! Total items: " + itemsAdded);
-                Console.WriteLine("Queue! dataItemQueue count: " + dataItemQueue.Count);
-                Console.WriteLine("Queue! dataItemNext count: " + dataItemNext.Count);
-            }
-        }
-
-        private async void _DebugOutAsync(string output)
-        {
-            await Task.Run(() =>
-            {
-                Console.WriteLine(output);
-            });
-        }
-    }
-
 
     //A class for sorting items into pattern lists and checking for duplicates.
     //This is a stateful class; it must be instantiated. This is done so the caller can cancel running operations without
@@ -695,105 +519,6 @@ namespace FileSystemSearch
         }
 
 
-        //Create a new pattern list. Performs duplicate check.
-        /*
-        public static ResultCode CreatePatternList(Object dbLockObject, string newPattern)
-        {
-            const bool debug = true;
-            const string debugName = "_CreatePatternList:";
-
-            lock (dbLockObject)
-            {
-                using (DBClass db = new DBClass())
-                {
-                    if (_IsDuplicate(db, newPattern))
-                    {
-                        return ResultCode.DUPLICATE_FOUND;
-                    }
-
-                    PatternList newList = new PatternList { pattern = newPattern };
-
-                    if (debug) _DebugOut(debugName + "New pattern list added: " + newList.pattern);
-
-                    lock (db)
-                    {
-                        db.Add(newList);
-
-                        db.SaveChanges();
-                    }
-                    //this has to be done here or the next duplicate check will check the DB on disk and miss
-                    //a possible duplicate
-                }
-            }
-            return ResultCode.SUCCESS;
-        }
-        */
-
-        //Generate pattern lists based on common patterns. This will only create lists, it doesn't populate them.
-        //Review if we actually need this
-        /*
-        public static void GeneratePatterns(DBClass db)
-        {
-            //Just to get this off the ground, this will currently
-            //only generate a pattern for each individual character found in filenames
-
-            IQueryable allFiles = from DataItem in db.DataItems
-                                  select DataItem;
-
-            foreach(DataItem item in allFiles)
-            {
-                for (int character = 0; character < item.CaseInsensitiveFilename.Count(); character++)
-                {
-                    ResultCode result = CreatePatternList(db, item.CaseInsensitiveFilename[character].ToString());
-
-                    //if (result == ResultCode.DUPLICATE_FOUND) _DebugOut("Dupey!!!!");
-                }
-            }
-
-            db.SaveChanges();
-        }*/
-
-
-        //Populate pattern lists with all relevant DataItems
-        //Review if we actually need this
-        /*
-        public static ResultCode PopulatePatternLists(DBClass db)
-        {
-            const bool verbose = true;
-            const string debugName = "PopulatePatternLists:";
-
-            IQueryable allLists = from PatternList in db.PatternLists
-                                  select PatternList;
-
-            foreach (PatternList list in allLists)
-            {
-                if (verbose)
-                {
-                    _DebugOut(debugName + "Populating pattern list: " + list.pattern);
-                }
-
-                IQueryable matches = from DataItem in db.DataItems
-                                     where (DataItem.CaseInsensitiveFilename.Contains(list.pattern)) == true
-                                     select DataItem;
-
-                foreach (DataItem match in matches)
-                {
-
-                    DataItemPatternList association = new DataItemPatternList();
-                    association.DataItem = match;
-                    association.PatternList = list;
-
-                    db.DataItemPatternLists.Add(association);
-                }
-
-            }
-
-            db.SaveChanges();
-            return ResultCode.SUCCESS;
-        }*/
-
-
-
         //Format a database to a list. This is slow and will consume a lot of memory.
         public static List<DataItem> DBToList(Object dbLockObject)
         {
@@ -840,7 +565,8 @@ namespace FileSystemSearch
 
                 //Note: RunQueue must start before the first folder add; concurrency issues can otherwise cause this function
                 //to return before the queue has begun processing
-                queue.RunQueue();
+                //Additional note: This may no longer be true, but I'm leaving the first note in case deleting it causes terrible things to happen
+                Task queueTask = queue.RunQueue();
 
                 await _AddFolderRecursive(dbLockObject, rootFolder, folders, queue, setDuplicateFlag);
 
@@ -855,7 +581,9 @@ namespace FileSystemSearch
 
                 queue.SetComplete();
 
-                while (queue.operationsPending) ; //Block until pending operations are completed
+                //while (queue.operationsPending) ; //Block until pending operations are completed
+
+                await queueTask; //Block until pending operations are completed
 
                 if (debug)
                 {
@@ -1006,30 +734,6 @@ namespace FileSystemSearch
             }
 
         }
-
-
-        //Check whether an identical pattern list is already in this database
-        /*
-        private static bool _IsDuplicate(Object db, string pattern)
-        {
-            int keysFound = 0;
-
-            IQueryable findDupe = from PatternList in db.PatternLists
-                                    where PatternList.pattern == pattern
-                                    select PatternList;
-
-            foreach (PatternList foundList in findDupe)
-            {
-                keysFound++;
-                if (keysFound > 0)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }*/
-
 
         //Call when handling an unauthorized access exception from the file system
         private static void _UnauthorizedFileHandler(Exception e)
