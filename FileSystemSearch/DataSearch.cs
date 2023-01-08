@@ -133,42 +133,6 @@ namespace FileSystemSearch
             return ResultCode.SUCCESS;
         }
 
-        //Returns all DataItems associated with a pattern list
-        /*
-        public static List<DataItem> GetPatternListContents(Object db, PatternList list)
-        {
-            IQueryable listContents = from DataItemPatternList in db.DataItemPatternLists
-                                      where DataItemPatternList.PatternList.pattern == list.pattern
-                                      select DataItemPatternList.DataItem;
-
-            List<DataItem> results = new List<DataItem>();
-            
-            foreach (DataItem item in listContents)
-            {
-                results.Add(item);
-            }
-
-            return results;
-        }*/
-
-
-        //Returns the pattern lists that are relevant to a query.
-        /*
-        public static List<PatternList> FindMatchingPatternLists(Object db, string query)
-        {
-            List<PatternList> foundLists = new List<PatternList>();
-
-            IQueryable relevantLists = from PatternList in db.PatternLists
-                                       where query.Contains(PatternList.pattern)
-                                       select PatternList;
-
-            lock (db)
-            {
-                foreach (PatternList list in relevantLists) foundLists.Add(list);
-            }
-
-            return foundLists;
-        }*/
 
 
         //*********************Private methods
