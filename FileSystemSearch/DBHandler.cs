@@ -1,6 +1,11 @@
-﻿
-//Copyright 2022 Chris / abstractedfox
+﻿//Copyright 2023 Chris/abstractedfox.
+//This work is not licensed for use as source or training data for any language model, neural network,
+//AI tool or product, or other software which aggregates or processes material in a way that may be used to generate
+//new or derived content from or based on the input set, or used to build a data set or training model for any software or
+//tooling which facilitates the use or operation of such software.
+
 //chriswhoprograms@gmail.com
+
 
 using Microsoft.Data.Sqlite;
 using System;
@@ -39,268 +44,6 @@ namespace FileSystemSearch
         DUPLICATE_FOUND
     }
 
-
-    //A class for sorting items into pattern lists and checking for duplicates.
-    //This is a stateful class; it must be instantiated. This is done so the caller can cancel running operations without
-    //waiting for them to finish
-    /*
-    class Housekeeping
-    {
-        const bool debug = true;
-
-        Object db;
-        int taskLimit;
-        List<Task> runningTasks;
-        bool cancelHousekeeping;
-        public bool isHousekeeping;
-
-        List<DataItem> dbCopy;
-
-        public delegate void ResultReturn(DataItem result, ResultCode code);
-
-        public Housekeeping(Object dbToUse)
-        {
-            runningTasks = new List<Task>();
-            dbCopy = new List<DataItem>();
-            db = dbToUse;
-            taskLimit = 8;
-            isHousekeeping = false;
-            cancelHousekeeping = false;
-        }
-
-        public async Task StartHousekeeping(ResultReturn resultOut)
-        {
-            const bool debug = false;
-            const string debugName = "Housekeeping.StartHousekeeping():";
-
-            if (debug) _debugOut(debugName + "Start");
-
-            if (isHousekeeping == true)
-            {
-                if (debug) _debugOut(debugName + "StartHousekeeping is already running.");
-                return;
-            }
-
-            isHousekeeping = true;
-            await Task.Run(() => {
-                while (!cancelHousekeeping)
-                {
-                    IQueryable unprocessedFiles = from DataItem in db.DataItems
-                                                  where DataItem.HasBeenDuplicateChecked == false
-                                                  select DataItem;
-
-                    List<DataItem> itemsToProcess = new List<DataItem>();
-
-                    lock (db)
-                    {
-                        foreach (DataItem item in unprocessedFiles)
-                        {
-                            itemsToProcess.Add(item);
-                        }
-                    }
-
-                    if (debug) _debugOut(debugName + "Unprocessed files: " + itemsToProcess.Count);
-
-
-                    for (int i = 0; i < itemsToProcess.Count; i++)
-                    {
-                        while (GetPendingTasks() > taskLimit) ; //Block if the task limit is hit
-                        _processFile(itemsToProcess[i], resultOut);
-                    }
-
-                    while (GetPendingTasks() > 0) ; //Block if any tasks are incomplete
-                    
-                    lock (db)
-                    {
-                        db.SaveChanges();
-                    }
-
-                    //Having this self-terminate may be less desirable if this is split off into a persistent process later
-                    cancelHousekeeping = true;
-                }
-                isHousekeeping = false;
-                if (debug) _debugOut(debugName + "Housekeeping has ended.");
-            });
-        }
-
-
-        public void CancelHousekeeping()
-        {
-            const bool debug = true;
-            if (debug) _debugOut("CancelHousekeeping called");
-            cancelHousekeeping = true;
-        }
-
-
-        //Sets the local dbCopy list to a passed list. Remember that lists are a reference type.
-        public void SetDBCopy(List<DataItem> dbCopySource)
-        {
-            dbCopy = dbCopySource; 
-        }
-
-
-        //Performs a dupe-check on the contents of dbCopy only. Marks any found duplicates for deletion.
-        //Slow, but technically faster than doing it via database queries.
-        public int DupeCheckFast()
-        {
-            int dupesFound = 0;
-            int iterations = 0;
-            if (dbCopy.Count > 0)
-            {
-                for (int outer = 0; outer < dbCopy.Count; outer++)
-                {
-                    _debugOut(iterations++.ToString());
-                    if (dbCopy[outer].HasBeenDuplicateChecked == false)
-                    {
-                        for (int inner = outer + 1; inner < dbCopy.Count; inner++)
-                        {
-                            if (dbCopy[outer].FullPath == dbCopy[inner].FullPath && dbCopy[outer].Id != dbCopy[inner].Id)
-                            {
-                                lock (dbCopy)
-                                {
-                                    dbCopy[outer].MarkForDeletion = true;
-                                    dupesFound++;
-                                }
-                            }
-                            lock (dbCopy)
-                            {
-                                dbCopy[outer].HasBeenDuplicateChecked = true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            return dupesFound;
-        }
-
-        //Check a single file for duplicates and add it to pattern lists. sourceList is the list of DataItems that is supplying
-        //this function; if a duplicate is found, this function will remove it on its own.
-        private async void _processFile(DataItem item, ResultReturn resultOut)
-        {
-            const bool debug = false;
-            const string debugName = "Housekeeping._processFile():";
-            runningTasks.Add(Task.Run(() => {
-                if (debug) _debugOut(debugName + "Processing " + item.FullPath);
-
-                
-                if (_isDuplicate(item))
-                {
-                    if (debug) _debugOut(debugName + "Duplicate found: " + item.FullPath);
-                    resultOut(item, ResultCode.DUPLICATE_FOUND);
-                    lock (db)
-                    {
-                        DBHandler.RemoveItem(db, item);
-                    }
-                    return;
-                }
-
-                //We're going to leave all this out; the pattern list functionality may not be needed after all
-                if (false)
-                {
-
-                    if (debug) _debugOut(debugName + "Checking for new pattern lists.");
-
-                    //Check whether any new pattern lists need to be made
-                    for (int i = 0; i < item.CaseInsensitiveFilename.Count(); i++)
-                    {
-                        if (DataSearch.FindMatchingPatternLists(db, item.CaseInsensitiveFilename[i].ToString()).Count() == 0)
-                        {
-                            lock (db)
-                            {
-                                ResultCode result = DBHandler.CreatePatternList(db, item.CaseInsensitiveFilename[i].ToString());
-                            }
-                        }
-                    }
-
-                    if (debug) _debugOut(debugName + "Building pattern list associations.");
-
-                    //Create any necessary associations with pattern lists
-                    List<PatternList> relevantLists = DataSearch.FindMatchingPatternLists(db, item.CaseInsensitiveFilename);
-
-                    foreach (PatternList list in relevantLists)
-                    {
-                        DataItemPatternList association = new DataItemPatternList();
-                        association.DataItem = item;
-                        association.PatternList = list;
-                        lock (db)
-                        {
-                            db.DataItemPatternLists.Add(association);
-                        }
-                    }
-                }
-
-                lock (db)
-                {
-                    item.HasBeenDuplicateChecked = true; //We're gonna have to make sure this is actually updating the db
-                }
-
-                if (debug) _debugOut(debugName + "Done");
-            }));
-        }
-
-        public int GetPendingTasks()
-        {
-            int results = 0;
-
-            for (int i = 0; i < runningTasks.Count; i++)
-            {
-
-                if (runningTasks[i].IsCompleted == false) results++;
-                /*
-                if (runningTasks.Count > 500)
-                {
-                    RemoveCompletedTasks();
-                }
-                
-            }
-            return results;
-        }
-
-        //Temporarily out of use as it caused concurrency issues. Also worth measuring if/when this is actually significant to performance
-        public async void RemoveCompletedTasks()
-        {
-            const string debugName = "Housekeeping.RemoveCompletedTasks():";
-            await Task.Run(() =>
-            {
-                _debugOut(debugName + "Flushing completed tasks");
-                lock (runningTasks)
-                {
-                    for (int i = runningTasks.Count - 1; i > 0; i--) {
-                        if (runningTasks[i].IsCompleted) runningTasks.RemoveAt(i);
-                    }
-                }
-            });
-        }
-
-        private async void _debugOut(string debugText)
-        {
-            await Task.Run(() => { Console.WriteLine(debugText); });
-        }
-
-        private bool _isDuplicate(DataItem item)
-        {
-            IQueryable dupeCheck = from DataItem in db.DataItems
-                                    where DataItem.FullPath == item.FullPath && DataItem.Id != item.Id
-                                    select DataItem;
-
-            bool foundDupe = false;
-
-            lock (db)
-            {
-                foreach (DataItem possibledupe in dupeCheck)
-                {
-                    foundDupe = true;
-                    break;
-                }
-            }
-
-            return foundDupe;
-
-            
-        }
-    }
-    */
     internal class DBHandler
     {
         //Add the contents of a single folder to the database.
@@ -317,7 +60,7 @@ namespace FileSystemSearch
             {
                 if (await _AddFolderRecursiveContainer(dbLockObject, folder, setDuplicateFlag) == ResultCode.SUCCESS)
                 {
-                    return ResultCode.SUCCESS;
+                     return ResultCode.SUCCESS;
                 }
                 else return ResultCode.FAIL;
             }
@@ -552,15 +295,14 @@ namespace FileSystemSearch
 
         //**********************Private functions below
 
-        //Call this to perform a recursive folder add. Set setDuplicateFlag = true to mark all results as duplicate checked
+        //Call this to perform a recursive folder add.
         private static async Task<ResultCode> _AddFolderRecursiveContainer(Object dbLockObject, System.IO.DirectoryInfo rootFolder, bool setDuplicateFlag)
         {
             const bool debug = true;
             const string debugName = "_AddFolderRecursiveContainer:";
-
+            
             using (DBQueue queue = new DBQueue(dbLockObject))
             {
-
                 List<System.IO.DirectoryInfo> folders = new List<System.IO.DirectoryInfo>();
 
                 //Note: RunQueue must start before the first folder add; concurrency issues can otherwise cause this function
@@ -650,7 +392,6 @@ namespace FileSystemSearch
             DataItem thisFolder = new DataItem();
             thisFolder.FullPath = folder.FullName;
             thisFolder.CaseInsensitiveFilename = folder.Name.ToLower();
-            //if (setDuplicateFlag) thisFolder.HasBeenDuplicateChecked = true;
             thisFolder.HasBeenDuplicateChecked = setDuplicateFlag;
             thisFolder.IsFolder = true;
             queue.AddToQueue(thisFolder);
