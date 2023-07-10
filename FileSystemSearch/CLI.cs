@@ -231,26 +231,26 @@ namespace FileSystemSearch
         //**********Private methods
 
         //Initialize the database context
-        private async void Initialize()
+        private void Initialize()
         {
-                lock (_dbLockObject)
+            lock (_dbLockObject)
+            {
+                using (DBClass db = new DBClass())
                 {
-                    using (DBClass db = new DBClass())
+                    if (db == null)
                     {
-                        if (db == null)
-                        {
-                            _errorHandler("Database returned null.");
-                        }
-                        if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
-                        {
-                            _errorHandler("Database does not exist.");
-                        }
-
-                        _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
+                        _errorHandler("Database returned null.");
                     }
-                }
+                    if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
+                    {
+                        _errorHandler("Database does not exist.");
+                    }
 
-                return;
+                    _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
+                }
+            }
+
+            return;
         }
 
 

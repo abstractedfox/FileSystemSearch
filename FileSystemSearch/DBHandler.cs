@@ -29,10 +29,6 @@ using FileSystemSearch.Migrations;
 
 //Disposal of the database object should be done in the calling function to prevent conflicts
 
-//Let's avoid complicating things with performing database operations asynchronously
-//since we aren't sure how that will go over with SQLite
-
-
 namespace FileSystemSearch
 {
     public enum ResultCode
@@ -69,15 +65,7 @@ namespace FileSystemSearch
 
         }
 
-
-        //Pass a path to a single file to add it to the database. Currently empty as it's not super necessary right now
-        public static void AddItem(Object db, string path)
-        {
-
-        }
-
-
-        //Add a single DataItem. Mildly unnecessary but it's here if you want it
+        //Add a single DataItem
         public static async Task<ResultCode> AddItem(Object dbLockObject, DataItem item)
         {
             try
@@ -441,7 +429,6 @@ namespace FileSystemSearch
             return ResultCode.SUCCESS;
             
         }
-
 
         //Check whether an identical DataItem is already in this database
         private async static Task<bool> _IsDuplicate(Object dbLockObject, DataItem itemToCheck)

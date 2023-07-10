@@ -15,7 +15,7 @@ using System.Threading.Tasks;
 
 //Experiment for condensing DBQueue to use a single collection instead of two.
 //Not actually that performant! But let's keep it and see about tuning it up later.
-namespace FileSystemSearch
+namespace FileSystemSearch.Experimental
 {
     internal class DBQueueBetter : DBQueue
     {
@@ -31,7 +31,7 @@ namespace FileSystemSearch
         {
             lock (_localLockObj)
             {
-                return !base._finished || !base._finished && _dataItemQueue.Count == 0;
+                return !_finished || !_finished && _dataItemQueue.Count == 0;
             }
         }
 
@@ -50,13 +50,13 @@ namespace FileSystemSearch
                             //If the first item in the list is not the lock node, or if the caller is done sending data,
                             //pop the first item. If the first item is null, don't do anything.
 
-                            return (_dataItemQueue.First != null) && 
-                            (_dataItemQueue.First != lockNode)// && _dataItemQueue.First.Next != lockNode) 
-                            || (_finished && _dataItemQueue.Count > 0 && _dataItemQueue.First != null);
+                            return _dataItemQueue.First != null &&
+                            _dataItemQueue.First != lockNode// && _dataItemQueue.First.Next != lockNode) 
+                            || _finished && _dataItemQueue.Count > 0 && _dataItemQueue.First != null;
                         }
                     })())
                     {
-                        lock (base._dbLockObject)
+                        lock (_dbLockObject)
                         {
                             if (_dataItemQueue.First == null)
                             {

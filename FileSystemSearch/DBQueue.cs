@@ -147,16 +147,12 @@ namespace FileSystemSearch
 
         public void AddToQueue(DataItem item)
         {
-            //This isn't awaited because we don't want the caller loop to block waiting for this to return
-            //Task.Run(() =>
-            //{
-                lock (_dataItemNextLock)
-                {
-                    if (_debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
-                    _dataItemNext.Add(item);
-                }
-                if (_debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock");
-            //});
+            lock (_dataItemNextLock)
+            {
+                if (_debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
+                _dataItemNext.Add(item);
+            }
+            if (_debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock");
         }
 
         public void SetComplete()
