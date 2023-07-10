@@ -1,7 +1,10 @@
-﻿//Copyright 2022 Chris / abstractedfox
+﻿//Copyright 2023 Chris/abstractedfox.
+//This work is not licensed for use as source or training data for any language model, neural network,
+//AI tool or product, or other software which aggregates or processes material in a way that may be used to generate
+//new or derived content from or based on the input set, or used to build a data set or training model for any software or
+//tooling which facilitates the use or operation of such software.
+
 //chriswhoprograms@gmail.com
-
-
 
 
 namespace FileSystemSearch
@@ -11,12 +14,12 @@ namespace FileSystemSearch
     //keeping actual database writes synchronous
     class DBQueue : IDisposable
     {
-        private List<Task> _dbTasks;
+        //private List<Task> _dbTasks;
         private List<DataItem> _dataItemQueue, _dataItemNext;
         private Object _dataItemQueueLock = new Object();
         private Object _dataItemNextLock = new Object();
-        private Object? _dbLockObject;
-        private bool _finished;
+        protected Object? _dbLockObject;
+        protected bool _finished;
         private bool _disposed;
 
         private int _itemsAdded;
@@ -33,12 +36,12 @@ namespace FileSystemSearch
             }
         }
 
-        public DBQueue(Object lockObject)
+        public DBQueue(object dbLockObject)
         {
-            _dbTasks = new List<Task>();
+            //_dbTasks = new List<Task>();
             _dataItemQueue = new List<DataItem>();
             _dataItemNext = new List<DataItem>();
-            _dbLockObject = lockObject;
+            _dbLockObject = dbLockObject;
             _finished = false;
             _setOperationsPending = false;
             if (_debug) _DebugReadout();
@@ -49,7 +52,7 @@ namespace FileSystemSearch
 
         ~DBQueue(){
             if (_disposed) return;
-            _dbTasks.Clear();
+            //_dbTasks.Clear();
             _dataItemQueue.Clear();
             _dataItemNext.Clear();
             _dbLockObject = null;
@@ -60,7 +63,7 @@ namespace FileSystemSearch
         public void Dispose()
         {
             if (_disposed) return;
-            _dbTasks.Clear();
+            //_dbTasks.Clear();
             _dataItemQueue.Clear();
             _dataItemNext.Clear();
             _dbLockObject = null;
@@ -90,7 +93,7 @@ namespace FileSystemSearch
                         continue;
                     }
 
-                    if (superdebug) _DebugOutAsync("RunQueue Continue");
+                    if (superdebug) _DebugOutAsync("RunQueue Continue. _dataItemQueue: " + _dataItemQueue.Count + " _dataItemNext: " + _dataItemNext.Count);
 
                     //This arrangement is intended to prevent a situation where locking dataItemQueue could defeat the purpose
                     //of this class by making it perform effectively synchronously.
@@ -102,13 +105,10 @@ namespace FileSystemSearch
                             {
                                 if (debugQueueInfo) _DebugOutAsync("Flushing " + _dataItemNext.Count + " from dataItemNext");
                                 if (_debugLocks) _DebugOutAsync("RunQueue dataItemNext lock");
-                                foreach (DataItem item in _dataItemNext)
-                                {
-                                    _dataItemQueue.Add(item);
-                                }
+                                _dataItemQueue = _dataItemNext;
+                                
                             }
-
-                            _dataItemNext.Clear();
+                            _dataItemNext = new List<DataItem>();
                         }
                         if (_debugLocks) _DebugOutAsync("RunQueue dataItemNext unlock");
                     }
@@ -145,18 +145,14 @@ namespace FileSystemSearch
             });
         }
 
-        public async void AddToQueue(DataItem item)
+        public void AddToQueue(DataItem item)
         {
-            //This isn't awaited because we don't want the caller loop to block waiting for this to return
-            Task.Run(() =>
+            lock (_dataItemNextLock)
             {
-                lock (_dataItemNextLock)
-                {
-                    if (_debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
-                    _dataItemNext.Add(item);
-                }
-                if (_debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock");
-            });
+                if (_debugLocks) _DebugOutAsync("AddToQueue dataItemNext lock");
+                _dataItemNext.Add(item);
+            }
+            if (_debugLocks) _DebugOutAsync("AddToQueue dataItemNext unlock");
         }
 
         public void SetComplete()

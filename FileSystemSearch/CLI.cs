@@ -1,10 +1,16 @@
-﻿
-//Copyright 2022 Chris / abstractedfox
+﻿//Copyright 2023 Chris/abstractedfox.
+//This work is not licensed for use as source or training data for any language model, neural network,
+//AI tool or product, or other software which aggregates or processes material in a way that may be used to generate
+//new or derived content from or based on the input set, or used to build a data set or training model for any software or
+//tooling which facilitates the use or operation of such software.
+
 //chriswhoprograms@gmail.com
+
 
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -20,6 +26,14 @@ namespace FileSystemSearch
         private Object _dbLockObject = new Object();
         private List<DataItem> _results;
         private bool _exit;
+
+        Dictionary<string, string> commands = new Dictionary<string, string>
+        {
+            {"buildindex", "buildindex" },
+            {"rebuildindex", "rebuildindex" },
+            {"help", "help" },
+            {"exit", "exit" }
+        };
 
         const string userHelpText = "To perform a search, simply type any query. To select a result, enter the number of that result into the prompt.\n" +
             "To perform an advanced search, put each desired string in a pair of quotation marks. To search the full path, place a : at the beginning of a string.\n" +
@@ -56,6 +70,9 @@ namespace FileSystemSearch
                     _userOutput("Invalid input");
                     continue;
                 }
+
+                //string? command;
+                //commands.TryGetValue(input.Substring(1), out command);
 
                 if (input == "/help")
                 {
@@ -214,26 +231,26 @@ namespace FileSystemSearch
         //**********Private methods
 
         //Initialize the database context
-        private async void Initialize()
+        private void Initialize()
         {
-                lock (_dbLockObject)
+            lock (_dbLockObject)
+            {
+                using (DBClass db = new DBClass())
                 {
-                    using (DBClass db = new DBClass())
+                    if (db == null)
                     {
-                        if (db == null)
-                        {
-                            _errorHandler("Database returned null.");
-                        }
-                        if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
-                        {
-                            _errorHandler("Database does not exist.");
-                        }
-
-                        _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
+                        _errorHandler("Database returned null.");
                     }
-                }
+                    if (!(db.GetService<IDatabaseCreator>() as RelationalDatabaseCreator).Exists())
+                    {
+                        _errorHandler("Database does not exist.");
+                    }
 
-                return;
+                    _userOutput("Initialized with " + db.DataItems.Count<DataItem>() + " indexed files.");
+                }
+            }
+
+            return;
         }
 
 
